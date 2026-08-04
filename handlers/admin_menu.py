@@ -11,8 +11,36 @@ def get_main_menu_kb() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="📋 Список постов", callback_data="posts_page_0"),
             InlineKeyboardButton(text="➕ Добавить пост", callback_data="menu_add_post")
+        ],
+        [
+            InlineKeyboardButton(text="🔍 Просканировать каналы", callback_data="scan_channels")
         ]
     ])
+
+@router.callback_query(F.data == "scan_channels")
+async def process_scan_channels(callback: CallbackQuery, bot: Bot):
+    """Отображает список каналов, где бот сейчас находится в базе данных"""
+    channels = get_all_channels_detailed()
+    
+    if not channels:
+        text = (
+            "🔍 **Сканирование каналов**\n\n"
+            "❌ Бот пока не добавлен ни в один канал.\n\n"
+            "ℹ️ **Инструкция:** Добавьте бота в ваш Telegram-канал и назначьте его администратором с правом публикации сообщений. "
+            "После этого он автоматически появится в этом списке."
+        )
+    else:
+        text = "🔍 **Доступные каналы для постинга:**\n\n"
+        for idx, ch in enumerate(channels, 1):
+            text += f"{idx}. 📢 **{ch['title']}** (ID: `{ch['channel_id']}`)\n"
+        text += f"\nВсего подключено каналов: {len(channels)}"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Обновить", callback_data="scan_channels")],
+        [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="to_main_menu")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
 
 @router.message(CommandStart(), lambda msg: msg.from_user.id in config.ADMIN_IDS)
 async def cmd_start_admin(message: Message):
