@@ -293,7 +293,7 @@ async def process_toggle_status(callback: CallbackQuery):
         await view_single_post(callback)
 
 from aiogram import Bot
-from database.models import get_all_channels
+from database.models import get_all_channels_detailed
 
 def build_public_kb(buttons_json: str) -> InlineKeyboardMarkup:
     """Создает клавиатуру для подписчиков из сохраненного в БД JSON"""
@@ -322,20 +322,24 @@ async def process_publish_now(callback: CallbackQuery, bot: Bot):
     page = int(parts[3])
     
     post = get_post_by_id(post_id)
+    all_channels_db = get_all_channels_detailed()  # <-- ОБНОВЛЕННАЯ СТРОКА
+    
     if not post:
         await callback.answer("❌ Пост не найден.", show_alert=True)
         return
         
-    # БЕРЕМ КАНАЛЫ ИЗ ПОСТА
     try:
-        channels = json.loads(post['target_channels'])
+        chosen_channels = json.loads(post['target_channels'])
     except:
-        channels = []
+        chosen_channels = []
+        
+    # Проверяем, что выбранные каналы все еще существуют в нашей базе данных доступных каналов
+    available_ids = [ch['channel_id'] for ch in all_channels_db]
+    channels = [ch_id for ch_id in chosen_channels if ch_id in available_ids]
         
     if not channels:
-        await callback.answer("❌ Для этого поста не выбрано ни одного канала! Зайдите в «Настройка каналов».", show_alert=True)
+        await callback.answer("❌ Для этого поста не выбрано ни одного доступного канала! Зайдите в «Настройка каналов».", show_alert=True)
         return
-
 
     # Клавиатура со ссылками для обычных пользователей
     public_markup = build_public_kb(post['buttons'])
