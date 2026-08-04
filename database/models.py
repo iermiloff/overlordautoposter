@@ -18,6 +18,7 @@ def init_db():
                 buttons TEXT,
                 interval_min INTEGER,
                 is_active INTEGER DEFAULT 1,
+                target_channels TEXT DEFAULT '[]'
                 last_posted TEXT DEFAULT NULL
             )
         ''')
@@ -28,6 +29,21 @@ def init_db():
                 title TEXT
             )
         ''')
+        conn.commit()
+
+def get_all_channels_detailed():
+    """Получить список каналов со всеми полями (ID и Название)"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM channels ORDER BY title ASC")
+        return cursor.fetchall()
+
+def update_post_channels(post_id: int, channels_list: list):
+    """Обновить список целевых каналов для конкретного поста"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE posts SET target_channels = ? WHERE id = ?", (json.dumps(channels_list), post_id))
         conn.commit()
 
 def add_channel(channel_id: int, title: str):
