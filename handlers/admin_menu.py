@@ -104,24 +104,33 @@ def get_posts_list_kb(page: int) -> InlineKeyboardMarkup:
 @router.callback_query(F.data.startswith("posts_page_"))
 async def process_posts_page(callback: CallbackQuery):
     page = int(callback.data.split("_")[2])
-    total = get_posts_count()
     
-    if total == 0:
-        await callback.message.edit_text(
-            "📭 Список постов пуст. Сначала добавьте пост.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="to_main_menu")]
-            ])
-        )
+    # 1. Проверяем пустая ли база
+    if get_posts_count() == 0:
+        text = "📭 Список постов пуст."
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🏠 Главное меню", callback_data="to_main_menu")]])
+        
+        if callback.message.text:
+            await callback.message.edit_text(text, reply_markup=kb)
+        else:
+            try: await callback.message.delete()
+            except Exception: pass
+            await callback.message.answer(text, reply_markup=kb)
         return
 
-    await callback.message.edit_text(
-        f"📋 **Список постов (Страница {page + 1}):**\n"
-        f"🟢 — Автопостинг активен\n"
-        f"🔴 — На паузе\n\n"
-        f"Нажмите на пост для управления им:",
-        reply_markup=get_posts_list_kb(page)
-    )
+    # 2. Текст и кнопки списка постов
+    text = "📋 **Список постов:**\n🟢 — Активен | 🔴 — На паузе"
+    kb = get_posts_list_kb(page)
+
+    # 3. Умное обновление интерфейса (исправление бага)
+    if callback.message.text:
+        # Если старое сообщение было текстовым — просто редактируем его
+        await callback.message.edit_text(text, reply_markup=kb)
+    else:
+        # Если в старом сообщении было МЕДИА — удаляем его и шлем список новым сообщением
+        try: await callback.message.delete()
+        except Exception: pass
+        await callback.message.answer(text, reply_markup=kb)
 
 import json
 from datetime import datetime
