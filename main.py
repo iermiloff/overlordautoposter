@@ -18,7 +18,7 @@ logging.basicConfig(
 async def autoposting_scheduler(bot: Bot):
     """
     Фоновый цикл автопостинга.
-    Просыпается раз в минуту и проверяет, какие посты пора опубликовать.
+    Защищен от зависаний и бесконечного спама при ошибках в каналах.
     """
     logging.info("🚀 Фоновый планировщик автопостинга успешно запущен.")
     
@@ -59,9 +59,15 @@ async def autoposting_scheduler(bot: Bot):
                 
                 if should_publish:
                     public_markup = build_public_kb(post['buttons'])
-                    
                     logging.info(f"⏳ Наступило время публикации поста #{post['id']}")
                     
+                    # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Сразу обновляем время публикации в БД.
+                    # Даже если все каналы выдадут ошибку, бот зафиксирует попытку 
+                    # и не будет спамить каждую минуту, а подождет следующий интервал.
+                    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+                    update_last_posted(post['id'], now_str)
+                    
+                    # Перебираем каналы. Ошибка в одном канале теперь никак не прервет цикл
                     for channel_id in channels:
                         try:
                             if post['media_type'] in [None, "text"]:
@@ -72,12 +78,12 @@ async def autoposting_scheduler(bot: Bot):
                                 await bot.send_video(chat_id=channel_id, video=post['media_id'], caption=post['text'], reply_markup=public_markup, parse_mode="Markdown")
                             elif post['media_type'] == "animation":
                                 await bot.send_animation(chat_id=channel_id, animation=post['media_id'], caption=post['text'], reply_markup=public_markup, parse_mode="Markdown")
+                            
+                            logging.info(f"✅ Пост #{post['id']} успешно отправлен в канал {channel_id}")
+                            
                         except Exception as e:
+                            # Бот запишет ошибку по конкретному каналу, но продолжит слать в другие
                             logging.error(f"❌ Ошибка отправки поста #{post['id']} в канал {channel_id}: {e}")
-                    
-                    # Обновляем метку времени публикации в БД
-                    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-                    update_last_posted(post['id'], now_str)
                     
         except Exception as e:
             logging.error(f"🚨 Ошибка в цикле планировщика: {e}")
