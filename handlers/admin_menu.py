@@ -224,7 +224,6 @@ async def toggle_channel_for_post(callback: CallbackQuery):
     await manage_post_channels(callback)
 
 
-@router.callback_query(F.data.startswith("view_post_"))
 async def render_post_card(callback: CallbackQuery, post_id: int, page: int):
     """Вспомогательная функция для чистой отрисовки карточки поста без изменения callback.data"""
     post = get_post_by_id(post_id)
