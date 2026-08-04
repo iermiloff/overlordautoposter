@@ -258,3 +258,67 @@ async def process_publish_now(callback: CallbackQuery, bot: Bot):
     callback.data = f"view_post_{post_id}_{page}"
     await view_single_post(callback)
 
+# Экран подтверждения удаления поста
+@router.callback_query(F.data.startswith("confirm_del_"))
+async def confirm_delete_post(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    post_id = int(parts[2])
+    page = int(parts[3])
+    
+    # Кнопки подтверждения
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🗑 Да, удалить навсегда", callback_data=f"execute_del_{post_id}_{page}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"view_post_{post_id}_{page}")
+        ]
+    ])
+    
+    # Редактируем сообщение на предупреждение. Если было медиа, текст изменится под ним.
+    # Если медиа не было, просто изменится текст сообщения.
+    if callback.message.text:
+        await callback.message.edit_text(
+            f"⚠️ **Вы уверены, что хотите удалить пост #{post_id}?**\nЭто действие нельзя отменить.",
+            reply_markup=markup
+        )
+    else:
+        await callback.message.edit_caption(
+            caption=f"⚠️ **Вы уверены, что хотите удалить пост #{post_id}?**\nЭто действие нельзя отменить.",
+            reply_markup=markup
+        )
+
+# Само удаление после подтверждения
+@router.callback_query(F.data.startswith("execute_del_"))
+async def execute_delete_post(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    post_id = int(parts[2])
+    page = int(parts[3])
+    
+    # Удаляем из БД
+    delete_post(post_id)
+    await callback.answer("🗑 Пост успешно удален", show_alert=True)
+    
+    # Если у поста было медиа (сообщение без основного текста), то для возврата к списку
+    # проще удалить это сообщение и отправить список заново, чтобы интерфейс выглядел аккуратно
+    if not callback.message.text:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        # Отправляем список постов заново
+        total = get_posts_count()
+        if total == 0:
+            await callback.message.answer(
+                "📭 Список постов пуст.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="to_main_menu")]
+                ])
+            )
+        else:
+            await callback.message.answer(
+                f"📋 **Список постов (Страница {page + 1}):**\nВыберите пост для управления:",
+                reply_markup=get_posts_list_kb(page)
+            )
+    else:
+        # Если это был чисто текстовый пост, плавно возвращаем менеджера к списку через edit_text
+        callback.data = f"posts_page_{page}"
+        await process_posts_page(callback)
