@@ -224,11 +224,23 @@ async def toggle_channel_for_post(callback: CallbackQuery):
     await manage_post_channels(callback)
 
 
-async def render_post_card(callback: CallbackQuery, post_id: int, page: int):
-    """Вспомогательная функция для чистой отрисовки карточки поста без изменения callback.data"""
+async def render_post_card(event, post_id: int, page: int):
+    """
+    Универсальная функция отрисовки карточки поста.
+    Принимает в качестве event как CallbackQuery, так и Message.
+    """
+    # Автоматически определяем, с каким типом события мы работаем
+    from aiogram.types import CallbackQuery, Message
+    
+    if isinstance(event, CallbackQuery):
+        target_message = event.message
+    else:
+        target_message = event
+
     post = get_post_by_id(post_id)
     if not post:
-        await callback.answer("❌ Пост не найден.", show_alert=True)
+        if isinstance(event, CallbackQuery):
+            await event.answer("❌ Пост не найден.", show_alert=True)
         return
 
     status_str = "🟢 Активен (в ротации)" if post['is_active'] == 1 else "🔴 На паузе"
@@ -251,25 +263,33 @@ async def render_post_card(callback: CallbackQuery, post_id: int, page: int):
 
     markup = get_post_manage_kb(post_id, post['is_active'], page)
 
-    # Если медиа нет, обновляем в том же сообщении
+    # Если медиа нет, обновляем текст в текущем сообщении
     if post['media_type'] in [None, "text"]:
-        await callback.message.edit_text(caption, reply_markup=markup, parse_mode="Markdown")
+        # Если пришли из callback-кнопки — редактируем старое сообщение
+        if isinstance(event, CallbackQuery):
+            await target_message.edit_text(caption, reply_markup=markup, parse_mode="Markdown")
+        else:
+            # Если пришли после ввода текста — удаляем временную заглушку и шлем чистое меню
+            try: await target_message.delete()
+            except Exception: pass
+            await target_message.answer(caption, reply_markup=markup, parse_mode="Markdown")
     else:
-        # Если есть медиа, удаляем старое текстовое меню
+        # Если у поста есть медиа — удаляем старое текстовое сообщение, чтобы не спамить
         try:
-            await callback.message.delete()
-        except TelegramBadRequest:
+            await target_message.delete()
+        except Exception:
             pass
         
-        # Отправляем сообщение с медиафайлом
+        # Отправляем новое сообщение с медиафайлом
         if post['media_type'] == "photo":
-            await callback.message.answer_photo(photo=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
+            await target_message.answer_photo(photo=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
         elif post['media_type'] == "video":
-            await callback.message.answer_video(video=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
+            await target_message.answer_video(video=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
         elif post['media_type'] == "animation":
-            await callback.message.answer_animation(animation=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
+            await target_message.answer_animation(animation=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
         else:
-            await callback.message.answer(caption + f"\n\n📎 *ID Медиа:* `{post['media_id']}`", reply_markup=markup, parse_mode="Markdown")
+            await target_message.answer(caption + f"\n\n📎 *ID Медиа:* `{post['media_id']}`", reply_markup=markup, parse_mode="Markdown")
+
 
 
 # Перехватчик нажатия на пост из списка пагинации
