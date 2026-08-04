@@ -12,17 +12,44 @@ def init_db():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS posts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                media_type TEXT,      -- photo, video, animation, text
-                media_id TEXT,        -- file_id или ссылка
+                media_type TEXT,
+                media_id TEXT,
                 text TEXT,
-                buttons TEXT,         -- JSON-строка со списком кнопок
-                interval_min INTEGER, -- интервал в минутах
+                buttons TEXT,
+                interval_min INTEGER,
                 is_active INTEGER DEFAULT 1,
                 last_posted TEXT DEFAULT NULL
             )
         ''')
+        # Новая таблица для каналов
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS channels (
+                channel_id INTEGER PRIMARY KEY,
+                title TEXT
+            )
+        ''')
         conn.commit()
 
+def add_channel(channel_id: int, title: str):
+    """Сохранить канал при добавлении бота в админы"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO channels (channel_id, title) VALUES (?, ?)", (channel_id, title))
+        conn.commit()
+
+def remove_channel(channel_id: int):
+    """Удалить канал, если бота убрали из админов"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM channels WHERE channel_id = ?", (channel_id,))
+        conn.commit()
+
+def get_all_channels():
+    """Получить список всех каналов для рассылки"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT channel_id FROM channels")
+        return [row[0] for row in cursor.fetchall()]
 def get_posts_page(limit: int, offset: int):
     """Получение постов порциями для пагинации"""
     with sqlite3.connect(DB_PATH) as conn:
