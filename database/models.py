@@ -129,3 +129,16 @@ def update_post_channels(post_id: int, channels_list: list):
         cursor.execute("UPDATE posts SET target_channels = ? WHERE id = ?", (json.dumps(channels_list), post_id))
         conn.commit()
 
+def update_post_field(post_id: int, field_name: str, value):
+    """Универсальное обновление любого текстового/числового поля поста"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"UPDATE posts SET {field_name} = ? WHERE id = ?", (value, post_id))
+        conn.commit()
+
+def update_post_media(post_id: int, media_type: str, media_id: str):
+    """Обновление медиафайла поста"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE posts SET media_type = ?, media_id = ? WHERE id = ?", (media_type, media_id, post_id))
+        conn.commit()
