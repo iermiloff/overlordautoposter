@@ -94,3 +94,96 @@ async def process_posts_page(callback: CallbackQuery):
         f"Нажмите на пост для управления им:",
         reply_markup=get_posts_list_kb(page)
     )
+
+import json
+from datetime import datetime
+from aiogram.exceptions import TelegramBadRequest
+from database.models import update_post_status, delete_post, update_last_posted
+
+def get_post_manage_kb(post_id: int, is_active: int, page: int) -> InlineKeyboardMarkup:
+    """Клавиатура управления конкретным постом"""
+    status_text = "🔴 Приостановить" if is_active == 1 else "🟢 Активировать"
+    
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🚀 Опубликовать сейчас", callback_data=f"pub_now_{post_id}_{page}")
+        ],
+        [
+            InlineKeyboardButton(text=status_text, callback_data=f"toggle_{post_id}_{page}"),
+            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_post_{post_id}_{page}")
+        ],
+        [
+            InlineKeyboardButton(text="🗑 Удалить пост", callback_data=f"confirm_del_{post_id}_{page}")
+        ],
+        [
+            InlineKeyboardButton(text="⬅️ Назад к списку", callback_data=f"posts_page_{page}")
+        ]
+    ])
+
+@router.callback_query(F.data.startswith("view_post_"))
+async def view_single_post(callback: CallbackQuery):
+    """Просмотр карточки конкретного поста"""
+    parts = callback.data.split("_")
+    post_id = int(parts[2])
+    page = int(parts[3])
+    
+    post = get_post_by_id(post_id)
+    if not post:
+        await callback.answer("❌ Пост не найден.", show_alert=True)
+        return
+
+    # Формируем красивое описание настроек для менеджера
+    status_str = "🟢 Активен (в ротации)" if post['is_active'] == 1 else "🔴 На паузе"
+    last_p = post['last_posted'] if post['last_posted'] else "Ни разу"
+    
+    buttons_list = json.loads(post['buttons'])
+    btn_count = len(buttons_list)
+
+    caption = (
+        f"📝 **Карточка поста # {post['id']}**\n\n"
+        f"📊 **Статус:** {status_str}\n"
+        f"⏳ **Интервал:** каждые {post['interval_min']} мин.\n"
+        f"🔘 **Внешних кнопок:** {btn_count} шт.\n"
+        f"🕒 **Последний постинг:** {last_p}\n\n"
+        f"📋 **Текст поста:**\n---\n{post['text']}\n---"
+    )
+
+    markup = get_post_manage_kb(post_id, post['is_active'], page)
+
+    # Если медиа нет, просто обновляем интерфейс в том же сообщении
+    if post['media_type'] in [None, "text"]:
+        await callback.message.edit_text(caption, reply_markup=markup, parse_mode="Markdown")
+    else:
+        # Если есть медиа, во избежание визуального мусора удаляем старое текстовое меню
+        try:
+            await callback.message.delete()
+        except TelegramBadRequest:
+            pass
+        
+        # И отправляем новое чистое сообщение с медиафайлом и админ-кнопками под ним
+        if post['media_type'] == "photo":
+            await callback.message.answer_photo(photo=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
+        elif post['media_type'] == "video":
+            await callback.message.answer_video(video=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
+        elif post['media_type'] == "animation":
+            await callback.message.answer_animation(animation=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
+        else:
+            # На случай, если сохранен сырой file_id без явного типа
+            await callback.message.answer(caption + f"\n\n📎 *ID Медиа:* `{post['media_id']}`", reply_markup=markup, parse_mode="Markdown")
+
+# Переключатель Активировать / Деактивировать
+@router.callback_query(F.data.startswith("toggle_"))
+async def process_toggle_status(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    post_id = int(parts[1])
+    page = int(parts[2])
+    
+    post = get_post_by_id(post_id)
+    if post:
+        new_status = 0 if post['is_active'] == 1 else 1
+        update_post_status(post_id, new_status)
+        await callback.answer("✅ Статус успешно изменен")
+        
+        # Имитируем повторный клик для обновления карточки без дублирования кода
+        callback.data = f"view_post_{post_id}_{page}"
+        await view_single_post(callback)
