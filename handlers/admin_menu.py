@@ -225,26 +225,24 @@ async def toggle_channel_for_post(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("view_post_"))
-async def view_single_post(callback: CallbackQuery):
-    """Просмотр карточки конкретного поста"""
-    parts = callback.data.split("_")
-    post_id = int(parts[2])
-    page = int(parts[3])
-    
+async def render_post_card(callback: CallbackQuery, post_id: int, page: int):
+    """Вспомогательная функция для чистой отрисовки карточки поста без изменения callback.data"""
     post = get_post_by_id(post_id)
     if not post:
         await callback.answer("❌ Пост не найден.", show_alert=True)
         return
 
-    # Формируем красивое описание настроек для менеджера
     status_str = "🟢 Активен (в ротации)" if post['is_active'] == 1 else "🔴 На паузе"
     last_p = post['last_posted'] if post['last_posted'] else "Ни разу"
     
-    buttons_list = json.loads(post['buttons'])
-    btn_count = len(buttons_list)
+    try:
+        buttons_list = json.loads(post['buttons'])
+        btn_count = len(buttons_list)
+    except Exception:
+        btn_count = 0
 
     caption = (
-        f"📝 **Карточка поста # {post['id']}**\n\n"
+        f"📝 **Карточка поста #{post['id']}**\n\n"
         f"📊 **Статус:** {status_str}\n"
         f"⏳ **Интервал:** каждые {post['interval_min']} мин.\n"
         f"🔘 **Внешних кнопок:** {btn_count} шт.\n"
@@ -254,17 +252,17 @@ async def view_single_post(callback: CallbackQuery):
 
     markup = get_post_manage_kb(post_id, post['is_active'], page)
 
-    # Если медиа нет, просто обновляем интерфейс в том же сообщении
+    # Если медиа нет, обновляем в том же сообщении
     if post['media_type'] in [None, "text"]:
         await callback.message.edit_text(caption, reply_markup=markup, parse_mode="Markdown")
     else:
-        # Если есть медиа, во избежание визуального мусора удаляем старое текстовое меню
+        # Если есть медиа, удаляем старое текстовое меню
         try:
             await callback.message.delete()
         except TelegramBadRequest:
             pass
         
-        # И отправляем новое чистое сообщение с медиафайлом и админ-кнопками под ним
+        # Отправляем сообщение с медиафайлом
         if post['media_type'] == "photo":
             await callback.message.answer_photo(photo=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
         elif post['media_type'] == "video":
@@ -272,8 +270,17 @@ async def view_single_post(callback: CallbackQuery):
         elif post['media_type'] == "animation":
             await callback.message.answer_animation(animation=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
         else:
-            # На случай, если сохранен сырой file_id без явного типа
             await callback.message.answer(caption + f"\n\n📎 *ID Медиа:* `{post['media_id']}`", reply_markup=markup, parse_mode="Markdown")
+
+
+# Перехватчик нажатия на пост из списка пагинации
+@router.callback_query(F.data.startswith("view_post_"))
+async def view_single_post(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    post_id = int(parts[2])
+    page = int(parts[3])
+    await render_post_card(callback, post_id, page)
+
 
 # Переключатель Активировать / Деактивировать
 @router.callback_query(F.data.startswith("toggle_"))
@@ -288,9 +295,60 @@ async def process_toggle_status(callback: CallbackQuery):
         update_post_status(post_id, new_status)
         await callback.answer("✅ Статус успешно изменен")
         
-        # Имитируем повторный клик для обновления карточки без дублирования кода
-        callback.data = f"view_post_{post_id}_{page}"
-        await view_single_post(callback)
+        # Рендерим карточку заново БЕЗ перезаписи callback.data
+        await render_post_card(callback, post_id, page)
+
+
+# Кнопка моментальной публикации (в самом конце функции исправляем вызов)
+@router.callback_query(F.data.startswith("pub_now_"))
+async def process_publish_now(callback: CallbackQuery, bot: Bot):
+    parts = callback.data.split("_")
+    post_id = int(parts[2])
+    page = int(parts[3])
+    
+    post = get_post_by_id(post_id)
+    all_channels_db = get_all_channels_detailed()
+    
+    if not post:
+        await callback.answer("❌ Пост не найден.", show_alert=True)
+        return
+        
+    try:
+        chosen_channels = json.loads(post['target_channels'])
+    except:
+        chosen_channels = []
+        
+    available_ids = [ch['channel_id'] for ch in all_channels_db]
+    channels = [ch_id for ch_id in chosen_channels if ch_id in available_ids]
+        
+    if not channels:
+        await callback.answer("❌ Для этого поста не выбрано ни одного доступного канала! Зайдите в «Настройка каналов».", show_alert=True)
+        return
+
+    public_markup = build_public_kb(post['buttons'])
+    success_count = 0
+    
+    for channel_id in channels:
+        try:
+            if post['media_type'] in [None, "text"]:
+                await bot.send_message(chat_id=channel_id, text=post['text'], reply_markup=public_markup, parse_mode="Markdown")
+            elif post['media_type'] == "photo":
+                await bot.send_photo(chat_id=channel_id, photo=post['media_id'], caption=post['text'], reply_markup=public_markup, parse_mode="Markdown")
+            elif post['media_type'] == "video":
+                await bot.send_video(chat_id=channel_id, video=post['media_id'], caption=post['text'], reply_markup=public_markup, parse_mode="Markdown")
+            elif post['media_type'] == "animation":
+                await bot.send_animation(chat_id=channel_id, animation=post['media_id'], caption=post['text'], reply_markup=public_markup, parse_mode="Markdown")
+            success_count += 1
+        except Exception as e:
+            print(f"Ошибка отправки в канал {channel_id}: {e}")
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    update_last_posted(post_id, now_str)
+    
+    await callback.answer(f"🚀 Пост отправлен в {success_count} из {len(channels)} каналов!", show_alert=True)
+    
+    # ИСПРАВЛЕНО: Рендерим карточку заново БЕЗ перезаписи callback.data
+    await render_post_card(callback, post_id, page)
 
 from aiogram import Bot
 from database.models import get_all_channels_detailed
