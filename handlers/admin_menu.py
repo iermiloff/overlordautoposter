@@ -52,11 +52,16 @@ async def cmd_start_admin(message: Message):
 
 @router.callback_query(F.data == "to_main_menu")
 async def back_to_main_menu(callback: CallbackQuery):
-    """Возврат в главное меню через редактирование сообщения"""
-    await callback.message.edit_text(
-        "🤖 **Админ-панель автопостинга**\n\nВыберите нужное действие:",
-        reply_markup=get_main_menu_kb()
-    )
+    text = "🤖 **Админ-панель автопостинга**\n\nВыберите нужное действие:"
+    kb = get_main_menu_kb()
+    
+    if callback.message.text:
+        await callback.message.edit_text(text, reply_markup=kb)
+    else:
+        try: await callback.message.delete()
+        except Exception: pass
+        await callback.message.answer(text, reply_markup=kb)
+
 
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.models import get_posts_page, get_posts_count, get_post_by_id
