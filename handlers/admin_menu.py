@@ -492,3 +492,29 @@ async def execute_delete_post(callback: CallbackQuery):
         # Если это был чисто текстовый пост, плавно возвращаем менеджера к списку через edit_text
         callback.data = f"posts_page_{page}"
         await process_posts_page(callback)
+
+@router.callback_query(F.data.startswith("edit_post_"))
+async def show_edit_options(callback: CallbackQuery):
+    """Выводит меню выбора: что именно менеджер хочет отредактировать"""
+    parts = callback.data.split("_")
+    post_id = int(parts[2])
+    page = int(parts[3])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Изменить Текст", callback_data=f"ed_txt_{post_id}_{page}")],
+        [InlineKeyboardButton(text="🎬 Изменить Медиа", callback_data=f"ed_med_{post_id}_{page}")],
+        [InlineKeyboardButton(text="📢 Изменить Каналы", callback_data=f"post_ch_{post_id}_{page}")], # Сюда мы привязываем уже готовую настройку каналов!
+        [InlineKeyboardButton(text="🔘 Изменить Кнопки", callback_data=f"ed_btn_{post_id}_{page}")],
+        [InlineKeyboardButton(text="⏳ Изменить Интервал", callback_data=f"ed_int_{post_id}_{page}")],
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"view_post_{post_id}_{page}")]
+    ])
+    
+    text = f"✏️ **Редактирование поста #{post_id}**\n\nВыберите, какой элемент вы хотите изменить:"
+    
+    if callback.message.text:
+        await callback.message.edit_text(text, reply_markup=kb)
+    else:
+        try: await callback.message.delete()
+        except: pass
+        await callback.message.answer(text, reply_markup=kb)
+
