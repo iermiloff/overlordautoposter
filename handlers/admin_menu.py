@@ -129,12 +129,14 @@ from aiogram.exceptions import TelegramBadRequest
 from database.models import update_post_status, delete_post, update_last_posted
 
 def get_post_manage_kb(post_id: int, is_active: int, page: int) -> InlineKeyboardMarkup:
-    """Клавиатура управления конкретным постом"""
     status_text = "🔴 Приостановить" if is_active == 1 else "🟢 Активировать"
     
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🚀 Опубликовать сейчас", callback_data=f"pub_now_{post_id}_{page}")
+        ],
+        [
+            InlineKeyboardButton(text="📢 Настройка каналов", callback_data=f"post_ch_{post_id}_{page}")  # НОВАЯ КНОПКА
         ],
         [
             InlineKeyboardButton(text=status_text, callback_data=f"toggle_{post_id}_{page}"),
@@ -147,6 +149,80 @@ def get_post_manage_kb(post_id: int, is_active: int, page: int) -> InlineKeyboar
             InlineKeyboardButton(text="⬅️ Назад к списку", callback_data=f"posts_page_{page}")
         ]
     ])
+
+@router.callback_query(F.data.startswith("post_ch_"))
+async def manage_post_channels(callback: CallbackQuery):
+    """Экран выбора каналов для конкретного поста"""
+    parts = callback.data.split("_")
+    post_id = int(parts[2])
+    page = int(parts[3])
+    
+    post = get_post_by_id(post_id)
+    all_channels = get_all_channels_detailed()
+    
+    if not post:
+        await callback.answer("❌ Пост не найден.", show_alert=True)
+        return
+
+    # Десериализуем каналы, выбранные для этого поста
+    try:
+        chosen_channels = json.loads(post['target_channels'])
+    except:
+        chosen_channels = []
+
+    builder = InlineKeyboardBuilder()
+    
+    # Генерируем кнопки-переключатели для каждого канала
+    for ch in all_channels:
+        ch_id = ch['channel_id']
+        is_chosen = ch_id in chosen_channels
+        
+        # Если канал выбран — ставим галочку, если нет — пустой квадрат
+        icon = "✅" if is_chosen else "◻️"
+        
+        builder.row(InlineKeyboardButton(
+            text=f"{icon} {ch['title']}", 
+            callback_data=f"tglch_{post_id}_{ch_id}_{page}"
+        ))
+        
+    builder.row(InlineKeyboardButton(text="💾 Сохранить и вернуться", callback_data=f"view_post_{post_id}_{page}"))
+    
+    text = f"📢 **Настройка каналов для поста #{post_id}**\n\nНажимайте на каналы, чтобы включить или выключить публикацию поста в них:"
+    
+    if callback.message.text:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    else:
+        await callback.message.edit_caption(caption=text, reply_markup=builder.as_markup())
+
+# Обработчик клика по каналу (включение/выключение)
+@router.callback_query(F.data.startswith("tglch_"))
+async def toggle_channel_for_post(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    post_id = int(parts[1])
+    channel_id = int(parts[2])
+    page = int(parts[3])
+    
+    post = get_post_by_id(post_id)
+    if not post:
+        return
+        
+    try:
+        chosen_channels = json.loads(post['target_channels'])
+    except:
+        chosen_channels = []
+        
+    if channel_id in chosen_channels:
+        chosen_channels.remove(channel_id)
+    else:
+        chosen_channels.append(channel_id)
+        
+    update_post_channels(post_id, chosen_channels)
+    await callback.answer()
+    
+    # Перерисовываем меню выбора каналов
+    callback.data = f"post_ch_{post_id}_{page}"
+    await manage_post_channels(callback)
+
 
 @router.callback_query(F.data.startswith("view_post_"))
 async def view_single_post(callback: CallbackQuery):
@@ -246,15 +322,20 @@ async def process_publish_now(callback: CallbackQuery, bot: Bot):
     page = int(parts[3])
     
     post = get_post_by_id(post_id)
-    channels = get_all_channels()
-    
     if not post:
         await callback.answer("❌ Пост не найден.", show_alert=True)
         return
         
+    # БЕРЕМ КАНАЛЫ ИЗ ПОСТА
+    try:
+        channels = json.loads(post['target_channels'])
+    except:
+        channels = []
+        
     if not channels:
-        await callback.answer("❌ Нет каналов для публикации. Добавьте бота в админы какого-нибудь канала.", show_alert=True)
+        await callback.answer("❌ Для этого поста не выбрано ни одного канала! Зайдите в «Настройка каналов».", show_alert=True)
         return
+
 
     # Клавиатура со ссылками для обычных пользователей
     public_markup = build_public_kb(post['buttons'])
