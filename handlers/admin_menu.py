@@ -187,3 +187,74 @@ async def process_toggle_status(callback: CallbackQuery):
         # Имитируем повторный клик для обновления карточки без дублирования кода
         callback.data = f"view_post_{post_id}_{page}"
         await view_single_post(callback)
+
+from aiogram import Bot
+from database.models import get_all_channels
+
+def build_public_kb(buttons_json: str) -> InlineKeyboardMarkup:
+    """Создает клавиатуру для подписчиков из сохраненного в БД JSON"""
+    if not buttons_json:
+        return None
+    
+    try:
+        buttons_data = json.loads(buttons_json)
+    except:
+        return None
+        
+    if not buttons_data:
+        return None
+        
+    # Формируем кнопки в ряд (по одной на строку для аккуратности)
+    keyboard = []
+    for btn in buttons_data:
+        keyboard.append([InlineKeyboardButton(text=btn['text'], url=btn['url'])])
+        
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+@router.callback_query(F.data.startswith("pub_now_"))
+async def process_publish_now(callback: CallbackQuery, bot: Bot):
+    parts = callback.data.split("_")
+    post_id = int(parts[2])
+    page = int(parts[3])
+    
+    post = get_post_by_id(post_id)
+    channels = get_all_channels()
+    
+    if not post:
+        await callback.answer("❌ Пост не найден.", show_alert=True)
+        return
+        
+    if not channels:
+        await callback.answer("❌ Нет каналов для публикации. Добавьте бота в админы какого-нибудь канала.", show_alert=True)
+        return
+
+    # Клавиатура со ссылками для обычных пользователей
+    public_markup = build_public_kb(post['buttons'])
+    
+    success_count = 0
+    # Отправляем во все подключенные каналы
+    for channel_id in channels:
+        try:
+            if post['media_type'] in [None, "text"]:
+                await bot.send_message(chat_id=channel_id, text=post['text'], reply_markup=public_markup, parse_mode="Markdown")
+            elif post['media_type'] == "photo":
+                await bot.send_photo(chat_id=channel_id, photo=post['media_id'], caption=post['text'], reply_markup=public_markup, parse_mode="Markdown")
+            elif post['media_type'] == "video":
+                await bot.send_video(chat_id=channel_id, video=post['media_id'], caption=post['text'], reply_markup=public_markup, parse_mode="Markdown")
+            elif post['media_type'] == "animation":
+                await bot.send_animation(chat_id=channel_id, animation=post['media_id'], caption=post['text'], reply_markup=public_markup, parse_mode="Markdown")
+            success_count += 1
+        except Exception as e:
+            # Например, бота удалили из канала, а событие не отловилось
+            print(f"Ошибка отправки в канал {channel_id}: {e}")
+
+    # Обновляем время последней отправки в базе данных
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    update_last_posted(post_id, now_str)
+    
+    await callback.answer(f"🚀 Пост отправлен в {success_count} из {len(channels)} каналов!", show_alert=True)
+    
+    # Обновляем карточку поста на экране менеджера, чтобы зафиксировать новое время отправки
+    callback.data = f"view_post_{post_id}_{page}"
+    await view_single_post(callback)
+
