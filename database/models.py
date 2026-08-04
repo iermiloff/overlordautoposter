@@ -66,6 +66,7 @@ def get_all_channels():
         cursor = conn.cursor()
         cursor.execute("SELECT channel_id FROM channels")
         return [row[0] for row in cursor.fetchall()]
+        
 def get_posts_page(limit: int, offset: int):
     """Получение постов порциями для пагинации"""
     with sqlite3.connect(DB_PATH) as conn:
@@ -111,4 +112,15 @@ def update_last_posted(post_id: int, timestamp: str):
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("UPDATE posts SET last_posted = ? WHERE id = ?", (timestamp, post_id))
+        conn.commit()
+
+def add_post(media_type, media_id, text, buttons, interval, target_channels=None):
+    if target_channels is None:
+        target_channels = []
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO posts (media_type, media_id, text, buttons, interval_min, target_channels) VALUES (?, ?, ?, ?, ?, ?)",
+            (media_type, media_id, text, json.dumps(buttons), interval, json.dumps(target_channels))
+        )
         conn.commit()
