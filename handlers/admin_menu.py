@@ -233,10 +233,20 @@ async def toggle_channel_for_post(callback: CallbackQuery):
     update_post_channels(post_id, chosen_channels)
     await callback.answer()
     
-    # Перерисовываем меню выбора каналов
-    callback.data = f"post_ch_{post_id}_{page}"
-    await manage_post_channels(callback)
-
+    all_channels = get_all_channels_detailed()
+    builder = InlineKeyboardBuilder()
+    
+    for ch in all_channels:
+        icon = "✅" if ch['channel_id'] in chosen else "◻️"
+        builder.row(InlineKeyboardButton(text=f"{icon} {ch['title']}", callback_data=f"tglch_{post_id}_{ch['channel_id']}_{page}"))
+        
+    builder.row(InlineKeyboardButton(text="💾 Сохранить и вернуться", callback_data=f"view_post_{post_id}_{page}"))
+    text = f"📢 **Настройка каналов для поста #{post_id}**\n\nНажимайте на каналы, чтобы включить или выключить публикацию поста в них:"
+    
+    if callback.message.text:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    else:
+        await callback.message.edit_caption(caption=text, reply_markup=builder.as_markup())
 
 async def render_post_card(event, post_id: int, page: int):
     """
