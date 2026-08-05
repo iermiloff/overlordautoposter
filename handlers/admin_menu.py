@@ -208,7 +208,6 @@ async def manage_post_channels(callback: CallbackQuery):
     else:
         await callback.message.edit_caption(caption=text, reply_markup=builder.as_markup())
 
-# Обработчик клика по каналу (включение/выключение)
 @router.callback_query(F.data.startswith("tglch_"))
 async def toggle_channel_for_post(callback: CallbackQuery):
     parts = callback.data.split("_")
@@ -218,26 +217,29 @@ async def toggle_channel_for_post(callback: CallbackQuery):
     
     post = get_post_by_id(post_id)
     if not post:
+        await callback.answer("❌ Пост не найден.", show_alert=True)
         return
         
     try:
-        chosen_channels = json.loads(post['target_channels'])
+        current_chosen = json.loads(post['target_channels'])
     except:
-        chosen_channels = []
+        current_chosen = []
         
-    if channel_id in chosen_channels:
-        chosen_channels.remove(channel_id)
+    # Включаем или выключаем канал
+    if channel_id in current_chosen:
+        current_chosen.remove(channel_id)
     else:
-        chosen_channels.append(channel_id)
+        current_chosen.append(channel_id)
         
-    update_post_channels(post_id, chosen_channels)
+    update_post_channels(post_id, current_chosen)
     await callback.answer()
     
+    # Заново перерисовываем интерфейс с новыми галочками
     all_channels = get_all_channels_detailed()
     builder = InlineKeyboardBuilder()
     
     for ch in all_channels:
-        icon = "✅" if ch['channel_id'] in chosen else "◻️"
+        icon = "✅" if ch['channel_id'] in current_chosen else "◻️"
         builder.row(InlineKeyboardButton(text=f"{icon} {ch['title']}", callback_data=f"tglch_{post_id}_{ch['channel_id']}_{page}"))
         
     builder.row(InlineKeyboardButton(text="💾 Сохранить и вернуться", callback_data=f"view_post_{post_id}_{page}"))
@@ -246,7 +248,12 @@ async def toggle_channel_for_post(callback: CallbackQuery):
     if callback.message.text:
         await callback.message.edit_text(text, reply_markup=builder.as_markup())
     else:
-        await callback.message.edit_caption(caption=text, reply_markup=builder.as_markup())
+        try:
+            await callback.message.edit_caption(caption=text, reply_markup=builder.as_markup())
+        except Exception:
+            # На случай, если структура сообщения изменилась
+            pass
+
 
 async def render_post_card(event, post_id: int, page: int):
     """
