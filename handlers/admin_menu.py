@@ -140,7 +140,7 @@ async def process_posts_page(callback: CallbackQuery):
 import json
 from datetime import datetime
 from aiogram.exceptions import TelegramBadRequest
-from database.models import update_post_status, delete_post, update_last_posted
+from database.models import update_post_status, delete_post, update_last_posted, update_post_channels
 
 def get_post_manage_kb(post_id: int, is_active: int, page: int) -> InlineKeyboardMarkup:
     status_text = "🔴 Приостановить" if is_active == 1 else "🟢 Активировать"
