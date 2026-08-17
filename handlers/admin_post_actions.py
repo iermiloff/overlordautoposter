@@ -32,7 +32,7 @@ async def manage_post_channels(callback: CallbackQuery):
         builder.row(InlineKeyboardButton(text=f"{icon} {ch['title']}", callback_data=f"tglch_{post_id}_{ch['channel_id']}_{page}"))
         
     builder.row(InlineKeyboardButton(text="💾 Сохранить и вернуться", callback_data=f"view_post_{post_id}_{page}"))
-    text = f"📂 **Настройка каналов для поста #{post_id}**\n\nНажимайте на каналы для выбора:"
+    text = f"📂 **Настройка каналов для поста #{post_id}**\n\nНажимайте на channels для выбора:"
     
     if callback.message.text: await callback.message.edit_text(text, reply_markup=builder.as_markup())
     else: await callback.message.edit_caption(caption=text, reply_markup=builder.as_markup())
@@ -77,7 +77,6 @@ async def process_toggle_status(callback: CallbackQuery):
         await callback.answer("✅ Статус успешно изменен")
         await render_post_card(callback, post_id, page)
 
-@router.callback_query(F.data.startswith("pub_now_{post_id}_{page}"))
 @router.callback_query(F.data.startswith("pub_now_"))
 async def process_publish_now(callback: CallbackQuery, bot: Bot):
     parts = callback.data.split("_")
