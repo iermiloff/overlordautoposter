@@ -9,38 +9,68 @@ def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        # Таблица постов
+        
+        # Таблица настроек (для хранения часового пояса)
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS posts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                media_type TEXT,
-                media_id TEXT,
-                text TEXT,
-                buttons TEXT,
-                interval_min INTEGER,
-                is_active INTEGER DEFAULT 1,
-                last_posted TEXT DEFAULT NULL,
-                target_channels TEXT DEFAULT '[]'
-            )
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
         ''')
+        
+        # Устанавливаем часовой пояс по умолчанию, если его нет
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('timezone', 'UTC')")
+        
+        # Таблица постов с поддержкой отложенных публикаций
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            media_type TEXT,
+            media_id TEXT,
+            text TEXT,
+            buttons TEXT,
+            interval_min INTEGER DEFAULT NULL,
+            publish_at TEXT DEFAULT NULL,
+            is_delayed INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1,
+            last_posted TEXT DEFAULT NULL,
+            target_channels TEXT DEFAULT '[]'
+        )
+        ''')
+        
         # Таблица каналов
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS channels (
-                channel_id INTEGER PRIMARY KEY,
-                title TEXT
-            )
+        CREATE TABLE IF NOT EXISTS channels (
+            channel_id INTEGER PRIMARY KEY,
+            title TEXT
+        )
         ''')
         conn.commit()
 
-def add_post(media_type, media_id, text, buttons, interval, target_channels=None):
-    """Добавление нового поста в базу данных"""
+def get_timezone() -> str:
+    """Получить текущий часовой пояс администратора"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM settings WHERE key = 'timezone'")
+        res = cursor.fetchone()
+        return res[0] if res else "UTC"
+
+def set_timezone(tz_name: str):
+    """Обновить часовой пояс администратора"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE settings SET value = ? WHERE key = 'timezone'", (tz_name,))
+        conn.commit()
+
+def add_post(media_type, media_id, text, buttons, interval=None, publish_at=None, is_delayed=0, target_channels=None):
+    """Добавление нового поста в базу данных (интервального или отложенного)"""
     if target_channels is None:
         target_channels = []
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO posts (media_type, media_id, text, buttons, interval_min, target_channels) VALUES (?, ?, ?, ?, ?, ?)",
-            (media_type, media_id, text, json.dumps(buttons), interval, json.dumps(target_channels))
+            "INSERT INTO posts (media_type, media_id, text, buttons, interval_min, publish_at, is_delayed, target_channels) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (media_type, media_id, text, json.dumps(buttons), interval, publish_at, is_delayed, json.dumps(target_channels))
         )
         conn.commit()
 
@@ -57,10 +87,7 @@ def get_posts_page(limit: int, offset: int):
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM posts ORDER BY id DESC LIMIT ? OFFSET ?", 
-            (limit, offset)
-        )
+        cursor.execute("SELECT * FROM posts ORDER BY id DESC LIMIT ? OFFSET ?", (limit, offset))
         return cursor.fetchall()
 
 def get_posts_count() -> int:
@@ -142,3 +169,4 @@ def update_post_media(post_id: int, media_type: str, media_id: str):
         cursor = conn.cursor()
         cursor.execute("UPDATE posts SET media_type = ?, media_id = ? WHERE id = ?", (media_type, media_id, post_id))
         conn.commit()
+
