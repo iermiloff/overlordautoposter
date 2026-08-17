@@ -36,18 +36,19 @@ def init_db():
         )
         ''')
         
-        # --- МИГРАЦИЯ ДЛЯ СУЩЕСТВУЮЩИХ БАЗ ДАННЫХ ---
-        # Проверяем существующие колонки в posts, чтобы не упасть при их отсутствии
+        # --- МИГРАЦИЯ СУЩЕСТВУЮЩЕЙ БАЗЫ ДАННЫХ (ФИКС) ---
         cursor.execute("PRAGMA table_info(posts)")
-        columns = [col[1] for col in cursor.fetchall()]
+        raw_columns = cursor.fetchall()
+        # Извлекаем строго имена колонок (они находятся на 2-й позиции в выводе PRAGMA)
+        existing_columns = [col[1] for col in raw_columns]
         
-        if "interval_min" not in columns:
+        if "interval_min" not in existing_columns:
             try: cursor.execute("ALTER TABLE posts ADD COLUMN interval_min INTEGER DEFAULT NULL")
             except: pass
-        if "publish_at" not in columns:
+        if "publish_at" not in existing_columns:
             try: cursor.execute("ALTER TABLE posts ADD COLUMN publish_at TEXT DEFAULT NULL")
             except: pass
-        if "is_delayed" not in columns:
+        if "is_delayed" not in existing_columns:
             try: cursor.execute("ALTER TABLE posts ADD COLUMN is_delayed INTEGER DEFAULT 0")
             except: pass
             
@@ -59,6 +60,7 @@ def init_db():
         )
         ''')
         conn.commit()
+
 
 def get_timezone() -> str:
     """Получить текущий часовой пояс администратора"""
