@@ -5,23 +5,21 @@ import os
 DB_PATH = "data/autoposter.db"
 
 def init_db():
-    """Инициализация базы данных при старте бота"""
+    """Инициализация базы данных при старте бота и миграция старых таблиц"""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         
-        # Таблица настроек (для хранения часового пояса)
+        # Таблица настроек
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
         )
         ''')
-        
-        # Устанавливаем часовой пояс по умолчанию, если его нет
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('timezone', 'UTC')")
         
-        # Таблица постов с поддержкой отложенных публикаций
+        # Базовое создание таблицы постов (для новых деплоев)
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS posts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,6 +36,21 @@ def init_db():
         )
         ''')
         
+        # --- МИГРАЦИЯ ДЛЯ СУЩЕСТВУЮЩИХ БАЗ ДАННЫХ ---
+        # Проверяем существующие колонки в posts, чтобы не упасть при их отсутствии
+        cursor.execute("PRAGMA table_info(posts)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if "interval_min" not in columns:
+            try: cursor.execute("ALTER TABLE posts ADD COLUMN interval_min INTEGER DEFAULT NULL")
+            except: pass
+        if "publish_at" not in columns:
+            try: cursor.execute("ALTER TABLE posts ADD COLUMN publish_at TEXT DEFAULT NULL")
+            except: pass
+        if "is_delayed" not in columns:
+            try: cursor.execute("ALTER TABLE posts ADD COLUMN is_delayed INTEGER DEFAULT 0")
+            except: pass
+            
         # Таблица каналов
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS channels (
