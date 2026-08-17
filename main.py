@@ -28,12 +28,15 @@ async def autoposting_scheduler(bot: Bot):
             now_utc = datetime.now(ZoneInfo("UTC"))
             
             for post in posts:
+                # Безопасно приводим Row к словарю для работы с миграциями
+                p_dict = dict(post)
+                
                 # Проверяем только активные посты
-                if post['is_active'] != 1:
+                if p_dict.get('is_active', 1) != 1:
                     continue
                     
                 try:
-                    channels = json.loads(post['target_channels'])
+                    channels = json.loads(p_dict.get('target_channels', '[]'))
                 except Exception:
                     channels = []
                     
@@ -43,98 +46,98 @@ async def autoposting_scheduler(bot: Bot):
                 should_publish = False
                 
                 # --- ЛОГИКА 1: ОБРАБОТКА ОТЛОЖЕННОГО ПОСТА ---
-                if post['is_delayed'] == 1:
+                if p_dict.get('is_delayed', 0) == 1:
                     try:
-                        # Получаем часовой пояс админа (или UTC по дефолту)
                         admin_tz_str = get_timezone()
-                        # Парсим локальное время, указанное админом при создании
-                        local_dt = datetime.strptime(post['publish_at'], "%d.%m.%Y %H:%M")
-                        # Присваиваем ему часовой пояс админа
-                        local_dt = local_dt.replace(tzinfo=ZoneInfo(admin_tz_str))
+                        if isinstance(admin_tz_str, (list, tuple)):
+                            admin_tz_str = admin_tz_str[0]
+                        admin_tz_str = str(admin_tz_str).strip()
                         
-                        # Если текущее UTC-время сервера больше или равно UTC-времени поста
+                        local_dt = datetime.strptime(p_dict.get('publish_at'), "%d.%m.%Y %H:%M")
+                        
+                        try:
+                            tz_obj = ZoneInfo(admin_tz_str)
+                        except Exception:
+                            logging.error(f"⚠️ Неизвестный часовой пояс '{admin_tz_str}', откат на UTC")
+                            tz_obj = ZoneInfo("UTC")
+                            
+                        local_dt = local_dt.replace(tzinfo=tz_obj)
+                        
                         if now_utc >= local_dt.astimezone(ZoneInfo("UTC")):
                             should_publish = True
                     except Exception as ex:
-                        logging.error(f"❌ Ошибка парсинга времени отложенного поста #{post['id']}: {ex}")
+                        logging.error(f"❌ Ошибка парсинга времени отложенного поста #{p_dict.get('id')}: {ex}")
                         continue
                 
                 # --- ЛОГИКА 2: ОБРАБОТКА ИНТЕРВАЛЬНОГО ПОСТА ---
                 else:
-                    # Серверное время без привязки к поясу для интервалов
                     now_naive = datetime.now()
-                    if not post['last_posted']:
-                        # Если пост еще ни разу не публиковался — отправляем его сразу
+                    if not p_dict.get('last_posted'):
                         should_publish = True
                     else:
                         try:
-                            last_posted_dt = datetime.strptime(post['last_posted'], "%Y-%m-%d %H:%M:%S")
-                            # Если с момента последней публикации прошло больше минут, чем заданный интервал
-                            if now_naive >= last_posted_dt + timedelta(minutes=post['interval_min']):
+                            last_posted_dt = datetime.strptime(p_dict.get('last_posted'), "%Y-%m-%d %H:%M:%S")
+                            if now_naive >= last_posted_dt + timedelta(minutes=p_dict.get('interval_min', 0)):
                                 should_publish = True
                         except ValueError:
-                            # На случай некорректного формата даты в БД
                             should_publish = True
                 
                 # --- ВЫПОЛНЕНИЕ ПУБЛИКАЦИИ ---
                 if should_publish:
-                    public_markup = build_public_kb(post['buttons'])
-                    logging.info(f" Наступило время публикации поста #{post['id']}")
+                    # ИСПРАВЛЕНО: Безопасное извлечение и сборка клавиатуры из JSON-строки
+                    buttons_json = p_dict.get('buttons', '[]')
+                    public_markup = build_public_kb(buttons_json)
                     
-                    # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Сразу обновляем время публикации в БД.
-                    # Даже если все каналы выдадут ошибку, бот зафиксирует попытку 
-                    # и не будет спамить каждую минуту, а подождет следующий интервал.
+                    logging.info(f" Наступило время публикации поста #{p_dict.get('id')}")
+                    
+                    # Фиксируем попытку отправки в базу данных
                     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    update_last_posted(post['id'], now_str)
+                    update_last_posted(p_dict.get('id'), now_str)
                     
-                    # Перебираем каналы. Ошибка в одном канале теперь никак не прервет цикл
+                    # Перебираем каналы
                     for channel_id in channels:
                         try:
-                            if post['media_type'] in [None, "text"]:
-                                await bot.send_message(chat_id=channel_id, text=post['text'], reply_markup=public_markup, parse_mode="Markdown")
-                            elif post['media_type'] == "photo":
-                                await bot.send_photo(chat_id=channel_id, photo=post['media_id'], caption=post['text'], reply_markup=public_markup, parse_mode="Markdown")
-                            elif post['media_type'] == "video":
-                                await bot.send_video(chat_id=channel_id, video=post['media_id'], caption=post['text'], reply_markup=public_markup, parse_mode="Markdown")
-                            elif post['media_type'] == "animation":
-                                await bot.send_animation(chat_id=channel_id, animation=post['media_id'], caption=post['text'], reply_markup=public_markup, parse_mode="Markdown")
+                            m_type = p_dict.get('media_type')
+                            m_id = p_dict.get('media_id')
+                            text_content = p_dict.get('text', '')
                             
-                            logging.info(f"✅ Пост #{post['id']} успешно отправлен в канал {channel_id}")
+                            if m_type in [None, "text"]:
+                                await bot.send_message(chat_id=channel_id, text=text_content, reply_markup=public_markup, parse_mode="Markdown")
+                            elif m_type == "photo":
+                                await bot.send_photo(chat_id=channel_id, photo=m_id, caption=text_content, reply_markup=public_markup, parse_mode="Markdown")
+                            elif m_type == "video":
+                                await bot.send_video(chat_id=channel_id, video=m_id, caption=text_content, reply_markup=public_markup, parse_mode="Markdown")
+                            elif m_type == "animation":
+                                await bot.send_animation(chat_id=channel_id, animation=m_id, caption=text_content, reply_markup=public_markup, parse_mode="Markdown")
+                            
+                            logging.info(f"✅ Пост #{p_dict.get('id')} успешно отправлен в канал {channel_id}")
                             
                         except Exception as e:
-                            # Бот запишет ошибку по конкретному каналу, но продолжит слать в другие
-                            logging.error(f"❌ Ошибка отправки поста #{post['id']} в канал {channel_id}: {e}")
+                            logging.error(f"❌ Ошибка отправки поста #{p_dict.get('id')} в канал {channel_id}: {e}")
                     
                     # Если пост был отложенным (одноразовым) — удаляем его после успешной публикации
-                    if post['is_delayed'] == 1:
-                        delete_post(post['id'])
-                        logging.info(f"⏰ Отложенный пост #{post['id']} выполнился и был удален из базы данных.")
+                    if p_dict.get('is_delayed', 0) == 1:
+                        delete_post(p_dict.get('id'))
+                        logging.info(f"⏰ Отложенный пост #{p_dict.get('id')} выполнился и был удален из базы данных.")
                         
         except Exception as e:
             logging.error(f" Ошибка в цикле планировщика: {e}")
             
-        # Спим 60 секунд до следующей проверки
         await asyncio.sleep(60)
 
 async def main():
-    # 1. Инициализируем базу данных
     init_db()
-    
-    # 2. Инициализируем бота и диспетчер
     bot = Bot(token=config.BOT_TOKEN)
     dp = Dispatcher()
     
-    # 3. Регистрируем роутеры обработчиков (включая новые разделенные файлы)
     dp.include_router(admin_menu.router)
     dp.include_router(admin_posts_list.router)
     dp.include_router(admin_post_actions.router)
     dp.include_router(add_post.router)
     dp.include_router(channels_track.router)
     
-    # 4. Запускаем фоновый планировщик автопостинга
     asyncio.create_task(autoposting_scheduler(bot))
     
-    # 5. Стираем старые вебхуки (если были) и запускаем Long Polling
     await bot.delete_webhook(drop_pending_updates=True)
     logging.info(" Бот успешно запущен в режиме Long Polling.")
     await dp.start_polling(bot)
