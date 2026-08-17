@@ -36,7 +36,8 @@ def get_posts_list_kb(page: int) -> InlineKeyboardMarkup:
 
 @router.callback_query(F.data.startswith("posts_page_"))
 async def process_posts_page(callback: CallbackQuery):
-    page = int(callback.data.split("_")[2])
+    parts = callback.data.split("_")
+    page = int(parts[2]) # Исправлен парсинг страницы
     if get_posts_count() == 0:
         text = "Список постов пуст."
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Главное меню", callback_data="to_main_menu")]])
@@ -114,7 +115,7 @@ async def render_post_card(event, post_id: int, page: int):
             await target_message.answer_video(video=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
         elif post['media_type'] == "animation":
             await target_message.answer_animation(animation=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
-
+            
 @router.callback_query(F.data.startswith("view_post_"))
 async def view_single_post(callback: CallbackQuery):
     parts = callback.data.split("_")
