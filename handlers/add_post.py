@@ -17,39 +17,40 @@ class AddPostState(StatesGroup):
     channels = State()
     button_name = State()
     button_url = State()
-    interval = State()
-
-class EditPostState(StatesGroup):
-    waiting_for_text = State()
-    waiting_for_media = State()
-    waiting_for_button_name = State()
-    waiting_for_button_url = State()
-    waiting_for_interval = State()
+    post_type = State()       # Стейт выбора типа публикации
+    interval = State()        # Стейт ввода интервала
+    publish_time = State()    # Стейт ввода даты/времени
 
 def get_cancel_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_add")]])
 
 def get_buttons_control_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить кнопку", callback_data="add_one_more_btn")],
-        [InlineKeyboardButton(text="⏳ Перейти к интервалу", callback_data="skip_buttons_step")]
+        [InlineKeyboardButton(text="➕ Добавить еще кнопку", callback_data="add_one_more_btn")],
+        [InlineKeyboardButton(text="⏭ К выбору типа публикации", callback_data="skip_buttons_step")]
     ])
 
 def get_fsm_channels_kb(all_channels, selected: list) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for ch in all_channels:
-        icon = "✅" if ch['channel_id'] in selected else "◻️"
+        icon = "✅" if ch['channel_id'] in selected else "⬜"
         builder.row(InlineKeyboardButton(text=f"{icon} {ch['title']}", callback_data=f"fsm_tglch_{ch['channel_id']}"))
     builder.row(InlineKeyboardButton(text="⏭ Далее к кнопкам", callback_data="fsm_channels_done"))
     builder.row(InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_add"))
     return builder.as_markup()
 
-# --- СЦЕНАРИЙ СОЗДАНИЯ ---
+def get_post_type_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Циклический (По интервалу)", callback_data="type_interval")],
+        [InlineKeyboardButton(text="⏰ Единовременный (Отложенный)", callback_data="type_delayed")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_add")]
+    ])
+
 @router.callback_query(F.data == "menu_add_post")
 async def start_add_post(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await state.set_state(AddPostState.text)
-    await callback.message.edit_text("📝 **Шаг 1 из 5: Текст поста**\n\nОтправьте текст:", reply_markup=get_cancel_kb())
+    await callback.message.edit_text("📝 **Шаг 1 из 5: Текст поста**\n\nОтправьте текст публикации:", reply_markup=get_cancel_kb())
 
 @router.message(AddPostState.text, F.text)
 async def process_text(message: Message, state: FSMContext):
@@ -57,7 +58,7 @@ async def process_text(message: Message, state: FSMContext):
     await state.set_state(AddPostState.media)
     try: await message.delete()
     except: pass
-    await message.answer("🎬 **Шаг 2 из 5: Медиафайл**\n\nОтправьте фото/видео/gif или `-` если медиа не нужно:", reply_markup=get_cancel_kb())
+    await message.answer("🖼 **Шаг 2 из 5: Медиафайл**\n\nОтправьте фото/видео/gif или знак `-`, если медиа не нужно:", reply_markup=get_cancel_kb())
 
 @router.message(AddPostState.media, F.photo | F.video | F.animation)
 async def process_media_file(message: Message, state: FSMContext):
@@ -67,7 +68,7 @@ async def process_media_file(message: Message, state: FSMContext):
     await state.set_state(AddPostState.channels)
     try: await message.delete()
     except: pass
-    await message.answer("📢 **Шаг 3 из 5: Выберите каналы:**", reply_markup=get_fsm_channels_kb(get_all_channels_detailed(), []))
+    await message.answer("📡 **Шаг 3 из 5: Выберите каналы:**", reply_markup=get_fsm_channels_kb(get_all_channels_detailed(), []))
 
 @router.message(AddPostState.media, F.text)
 async def process_media_text(message: Message, state: FSMContext):
@@ -77,7 +78,7 @@ async def process_media_text(message: Message, state: FSMContext):
     await state.set_state(AddPostState.channels)
     try: await message.delete()
     except: pass
-    await message.answer("📢 **Шаг 3 из 5: Выберите каналы:**", reply_markup=get_fsm_channels_kb(get_all_channels_detailed(), []))
+    await message.answer("📡 **Шаг 3 из 5: Выберите каналы:**", reply_markup=get_fsm_channels_kb(get_all_channels_detailed(), []))
 
 @router.callback_query(AddPostState.channels, F.data.startswith("fsm_tglch_"))
 async def process_fsm_toggle_channel(callback: CallbackQuery, state: FSMContext):
@@ -94,10 +95,10 @@ async def process_fsm_toggle_channel(callback: CallbackQuery, state: FSMContext)
 async def process_fsm_channels_done(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     if not data.get("selected_channels"):
-        await callback.answer("⚠️ Выберите каналы!", show_alert=True)
+        await callback.answer("⚠️ Выберите хотя бы один канал!", show_alert=True)
         return
     await state.set_state(AddPostState.button_name)
-    await callback.message.edit_text("🔘 **Шаг 4 из 5: Кнопки**", reply_markup=get_buttons_control_kb())
+    await callback.message.edit_text("🔘 **Шаг 4 из 5: Настройка кнопок**", reply_markup=get_buttons_control_kb())
 
 @router.callback_query(AddPostState.button_name, F.data == "add_one_more_btn")
 async def ask_button_name(callback: CallbackQuery):
@@ -109,7 +110,7 @@ async def process_button_name(message: Message, state: FSMContext):
     await state.set_state(AddPostState.button_url)
     try: await message.delete()
     except: pass
-    await message.answer(f"Отправьте URL-ссылку для «{message.text}»:", reply_markup=get_cancel_kb())
+    await message.answer(f"Отправьте URL для кнопки «{message.text}»:", reply_markup=get_cancel_kb())
 
 @router.message(AddPostState.button_url, F.text)
 async def process_button_url(message: Message, state: FSMContext):
@@ -117,129 +118,87 @@ async def process_button_url(message: Message, state: FSMContext):
     try: await message.delete()
     except: pass
     if not (url.startswith("http://") or url.startswith("https://") or url.startswith("tg://")):
-        await message.answer("❌ Начните с http:// или https://:", reply_markup=get_cancel_kb())
+        await message.answer("❌ Ссылка должна начинаться с http:// или https://:", reply_markup=get_cancel_kb())
         return
     data = await state.get_data()
     buttons = data.get("buttons", [])
     buttons.append({"text": data["temp_btn_name"], "url": url})
     await state.update_data(buttons=buttons, temp_btn_name=None)
     await state.set_state(AddPostState.button_name)
-    await message.answer("🔘 Кнопка добавлена!", reply_markup=get_buttons_control_kb())
+    await message.answer("✅ Кнопка добавлена!", reply_markup=get_buttons_control_kb())
 
 @router.callback_query(AddPostState.button_name, F.data == "skip_buttons_step")
 async def finish_buttons_step(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AddPostState.post_type)
+    await callback.message.edit_text("⚙️ **Шаг 5 из 5: Выберите тип публикации**", reply_markup=get_post_type_kb())
+
+@router.callback_query(AddPostState.post_type, F.data == "type_interval")
+async def choose_type_interval(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AddPostState.interval)
-    await callback.message.edit_text("⏳ **Шаг 5 из 5: Интервал** (в минутах):", reply_markup=get_cancel_kb())
+    await callback.message.edit_text("🔄 **Ввод интервала**\n\nВведите интервал повторения (в минутах):", reply_markup=get_cancel_kb())
 
 @router.message(AddPostState.interval, F.text)
 async def process_interval_and_save(message: Message, state: FSMContext):
     try: await message.delete()
     except: pass
     if not message.text.isdigit() or int(message.text) <= 0:
-        await message.answer("❌ Введите число:", reply_markup=get_cancel_kb())
+        await message.answer("❌ Введите целое число:", reply_markup=get_cancel_kb())
         return
     data = await state.get_data()
-    add_post(data.get("media_type"), data.get("media_id"), data.get("text"), data.get("buttons", []), int(message.text), data.get("selected_channels", []))
+    add_post(
+        media_type=data.get("media_type"),
+        media_id=data.get("media_id"),
+        text=data.get("text"),
+        buttons=data.get("buttons", []),
+        interval=int(message.text),
+        publish_at=None,
+        is_delayed=0,
+        target_channels=data.get("selected_channels", [])
+    )
     await state.clear()
-    await message.answer("🎉 Пост успешно создан!", reply_markup=get_main_menu_kb())
+    await message.answer("🎉 Циклический пост успешно добавлен в ротацию!", reply_markup=get_main_menu_kb())
 
-# --- СЦЕНАРИЙ РЕДАКТИРОВАНИЯ ---
-@router.callback_query(F.data.startswith("ed_txt_"))
-async def edit_text_trigger(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split("_")
-    await state.update_data(edit_post_id=int(parts[2]), edit_page=int(parts[3]))
-    await state.set_state(EditPostState.waiting_for_text)
-    await callback.message.edit_text("📝 Введите **новый текст**:", reply_markup=get_cancel_kb())
+@router.callback_query(AddPostState.post_type, F.data == "type_delayed")
+async def choose_type_delayed(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AddPostState.publish_time)
+    current_tz = get_timezone()
+    await callback.message.edit_text(
+        f"⏰ **Ввод времени отложенного поста**\n\n"
+        f"Выбранный часовой пояс: `{current_tz}`\n\n"
+        f"Отправьте дату и время публикации в формате:\n`ДД.ММ.ГГГГ ЧЧ:ММ`\n\n"
+        f"Пример: `25.12.2026 18:30`",
+        reply_markup=get_cancel_kb(),
+        parse_mode="Markdown"
+    )
 
-@router.message(EditPostState.waiting_for_text, F.text)
-async def process_edit_text(message: Message, state: FSMContext):
-    data = await state.get_data()
-    update_post_field(data['edit_post_id'], "text", message.text)
-    await state.clear()
-    await render_post_card(message, data['edit_post_id'], data['edit_page'])
-
-@router.callback_query(F.data.startswith("ed_med_"))
-async def edit_media_trigger(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split("_")
-    await state.update_data(edit_post_id=int(parts[2]), edit_page=int(parts[3]))
-    await state.set_state(EditPostState.waiting_for_media)
-    await callback.message.edit_text("🎬 Отправьте **новое медиа** или `-` для удаления:", reply_markup=get_cancel_kb())
-
-@router.message(EditPostState.waiting_for_media)
-async def process_edit_media(message: Message, state: FSMContext):
-    data = await state.get_data()
-    if message.text and message.text.strip() in ["-", "минус"]: update_post_media(data['edit_post_id'], "text", None)
-    elif message.photo: update_post_media(data['edit_post_id'], "photo", message.photo[-1].file_id)
-    elif message.video: update_post_media(data['edit_post_id'], "video", message.video.file_id)
-    elif message.animation: update_post_media(data['edit_post_id'], "animation", message.animation.file_id)
-    elif message.text: update_post_media(data['edit_post_id'], "unknown", message.text.strip())
-    await state.clear()
-    await render_post_card(message, data['edit_post_id'], data['edit_page'])
-
-@router.callback_query(F.data.startswith("ed_int_"))
-async def edit_interval_trigger(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split("_")
-    await state.update_data(edit_post_id=int(parts[2]), edit_page=int(parts[3]))
-    await state.set_state(EditPostState.waiting_for_interval)
-    await callback.message.edit_text("⏳ Введите **новый интервал** (мин):", reply_markup=get_cancel_kb())
-
-@router.message(EditPostState.waiting_for_interval, F.text)
-async def process_edit_interval(message: Message, state: FSMContext):
-    if not message.text.isdigit() or int(message.text) <= 0: return
-    data = await state.get_data()
-    update_post_field(data['edit_post_id'], "interval_min", int(message.text))
-    await state.clear()
-    await render_post_card(message, data['edit_post_id'], data['edit_page'])
-
-# Безопасный фильтр на изменение кнопок (срабатывает, если в конце число)
-@router.callback_query(F.data.startswith("ed_btn_"), lambda c: c.data.split("_")[-1].isdigit())
-async def edit_buttons_trigger(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split("_")
-    await state.update_data(edit_post_id=int(parts[2]), edit_page=int(parts[3]), buttons=[])
-    await state.set_state(EditPostState.waiting_for_button_name)
-    await callback.message.edit_text("🔘 **Перезапись кнопок**\n\nВведите название первой кнопки:", reply_markup=get_cancel_kb())
-
-@router.message(EditPostState.waiting_for_button_name, F.text)
-async def process_edit_btn_name(message: Message, state: FSMContext):
-    await state.update_data(temp_btn_name=message.text)
-    await state.set_state(EditPostState.waiting_for_button_url)
+@router.message(AddPostState.publish_time, F.text)
+async def process_delayed_time_and_save(message: Message, state: FSMContext):
     try: await message.delete()
     except: pass
-    await message.answer(f"Отправьте URL для «{message.text}»:", reply_markup=get_cancel_kb())
-
-@router.message(EditPostState.waiting_for_button_url, F.text)
-async def process_edit_btn_url(message: Message, state: FSMContext):
-    url = message.text.strip()
-    try: await message.delete()
-    except: pass
-    if not (url.startswith("http://") or url.startswith("https://") or url.startswith("tg://")): return
-
-    data = await state.get_data()
-    buttons = data.get("buttons", [])
-    buttons.append({"text": data["temp_btn_name"], "url": url})
-    await state.update_data(buttons=buttons, temp_btn_name=None)
-    update_post_field(data['edit_post_id'], "buttons", json.dumps(buttons))
+    time_str = message.text.strip()
     
-    control_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить еще", callback_data="subbtn_more")],
-        [InlineKeyboardButton(text="💾 Сохранить и выйти", callback_data="subbtn_save")]
-    ])
-    await state.set_state(EditPostState.waiting_for_button_name)
-    await message.answer(f"🔘 Добавлено кнопок: {len(buttons)}", reply_markup=control_kb)
-
-@router.callback_query(EditPostState.waiting_for_button_name, F.data == "subbtn_more")
-async def edit_more_btn_click(callback: CallbackQuery):
-    await callback.message.edit_text("Введите название следующей кнопки:", reply_markup=get_cancel_kb())
-
-@router.callback_query(EditPostState.waiting_for_button_name, F.data == "subbtn_save")
-async def edit_btn_save_click(callback: CallbackQuery, state: FSMContext):
+    try:
+        datetime.strptime(time_str, "%d.%m.%Y %H:%M")
+    except ValueError:
+        await message.answer("❌ Неверный формат. Шаблон: `ДД.ММ.ГГГГ ЧЧ:ММ` (Пример: `17.08.2026 21:00`):", reply_markup=get_cancel_kb())
+        return
+        
     data = await state.get_data()
-    await callback.message.delete()
+    add_post(
+        media_type=data.get("media_type"),
+        media_id=data.get("media_id"),
+        text=data.get("text"),
+        buttons=data.get("buttons", []),
+        interval=None,
+        publish_at=time_str,
+        is_delayed=1,
+        target_channels=data.get("selected_channels", [])
+    )
     await state.clear()
-    await render_post_card(callback.message, data['edit_post_id'], data['edit_page'])
+    await message.answer(f"🎉 Отложенный пост сохранен! Публикация в `{time_str}` по вашему поясу.", reply_markup=get_main_menu_kb())
 
-# --- ОТМЕНА ---
 @router.callback_query(F.data == "cancel_add")
 async def cancel_post_creation(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("🤖 **Админ-панель**\n\nДействие отменено.", reply_markup=get_main_menu_kb())
+    await callback.message.edit_text("🤖 Действие отменено.", reply_markup=get_main_menu_kb())
+
