@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher
 from config import config
 from database.models import init_db, get_all_posts, update_last_posted
-from handlers import admin_menu, add_post, channels_track
-from handlers.admin_menu import build_public_kb
+from handlers import admin_menu, admin_posts_list, admin_post_actions, add_post, channels_track
+
 
 # Настройка логирования
 logging.basicConfig(
@@ -101,6 +101,8 @@ async def main():
     
     # 3. Регистрируем наши роутеры обработчиков
     dp.include_router(admin_menu.router)
+    dp.include_router(admin_posts_list.router)
+    dp.include_router(admin_post_actions.router)
     dp.include_router(add_post.router)
     dp.include_router(channels_track.router)
     
