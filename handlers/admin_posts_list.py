@@ -15,12 +15,16 @@ def get_posts_list_kb(page: int) -> InlineKeyboardMarkup:
     total_posts = get_posts_count()
     
     for post in posts:
-        status_icon = "🟢" if post['is_active'] == 1 else "⚪"
-        type_icon = "⏰" if post['is_delayed'] == 1 else "🔄"
-        short_text = post['text'][:20] + "..." if len(post['text']) > 20 else post['text']
+        # Превращаем Row в обычный словарь или используем безопасный метод приведения к dict
+        p_dict = dict(post)
+        status_icon = "🟢" if p_dict.get('is_active', 1) == 1 else "⚪"
+        type_icon = "⏰" if p_dict.get('is_delayed', 0) == 1 else "🔄"
+        
+        text_val = p_dict.get('text', '')
+        short_text = text_val[:20] + "..." if len(text_val) > 20 else text_val
         builder.row(InlineKeyboardButton(
-            text=f"{status_icon} {type_icon} ID {post['id']}: {short_text}",
-            callback_data=f"view_post_{post['id']}_{page}"
+            text=f"{status_icon} {type_icon} ID {p_dict.get('id')}: {short_text}",
+            callback_data=f"view_post_{p_dict.get('id')}_{page}"
         ))
         
     nav_buttons = []
@@ -79,28 +83,32 @@ async def render_post_card(event, post_id: int, page: int):
         if isinstance(event, CallbackQuery): await event.answer("❌ Пост не найден.", show_alert=True)
         return
         
-    status_str = "Активен" if post['is_active'] == 1 else "На паузе"
-    last_p = post['last_posted'] if post['last_posted'] else "Ни разу"
+    p_dict = dict(post)
+    status_str = "Активен" if p_dict.get('is_active', 1) == 1 else "На паузе"
+    last_p = p_dict.get('last_posted') if p_dict.get('last_posted') else "Ни разу"
     
-    if post['is_delayed'] == 1:
-        type_str = f"⏰ Отложенный (План: `{post['publish_at']}`)"
+    if p_dict.get('is_delayed', 0) == 1:
+        type_str = f"⏰ Отложенный (План: `{p_dict.get('publish_at', '')}`)"
     else:
-        type_str = f"🔄 Циклический (Каждые {post['interval_min']} мин.)"
+        type_str = f"🔄 Циклический (Каждые {p_dict.get('interval_min', 0)} мин.)"
         
-    try: btn_count = len(json.loads(post['buttons']))
+    try: btn_count = len(json.loads(p_dict.get('buttons', '[]')))
     except: btn_count = 0
     
     caption = (
-        f"📄 **Карточка поста #{post['id']}**\n\n"
+        f"📄 **Карточка поста #{p_dict.get('id')}**\n\n"
         f"🔹 **Статус:** {status_str}\n"
         f"🔹 **Тип:** {type_str}\n"
         f"🔹 **Кнопок:** {btn_count} шт.\n"
         f"🔹 **Последняя отправка:** {last_p}\n\n"
-        f"📝 **Текст поста:**\n---\n{post['text']}\n---"
+        f"📝 **Текст поста:**\n---\n{p_dict.get('text', '')}\n---"
     )
-    markup = get_post_manage_kb(post_id, post['is_active'], page)
+    markup = get_post_manage_kb(post_id, p_dict.get('is_active', 1), page)
     
-    if post['media_type'] in [None, "text"]:
+    m_type = p_dict.get('media_type')
+    m_id = p_dict.get('media_id')
+    
+    if m_type in [None, "text"]:
         if isinstance(event, CallbackQuery): await target_message.edit_text(caption, reply_markup=markup, parse_mode="Markdown")
         else:
             try: await target_message.delete()
@@ -109,12 +117,12 @@ async def render_post_card(event, post_id: int, page: int):
     else:
         try: await target_message.delete()
         except: pass
-        if post['media_type'] == "photo":
-            await target_message.answer_photo(photo=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
-        elif post['media_type'] == "video":
-            await target_message.answer_video(video=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
-        elif post['media_type'] == "animation":
-            await target_message.answer_animation(animation=post['media_id'], caption=caption, reply_markup=markup, parse_mode="Markdown")
+        if m_type == "photo":
+            await target_message.answer_photo(photo=m_id, caption=caption, reply_markup=markup, parse_mode="Markdown")
+        elif m_type == "video":
+            await target_message.answer_video(video=m_id, caption=caption, reply_markup=markup, parse_mode="Markdown")
+        elif m_type == "animation":
+            await target_message.answer_animation(animation=m_id, caption=caption, reply_markup=markup, parse_mode="Markdown")
             
 @router.callback_query(F.data.startswith("view_post_"))
 async def view_single_post(callback: CallbackQuery):
