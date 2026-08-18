@@ -84,11 +84,11 @@ async def autoposting_scheduler(bot: Bot):
                 
                 # --- ВЫПОЛНЕНИЕ ПУБЛИКАЦИИ ---
                 if should_publish:
-                    # ИСПРАВЛЕНО: Безопасное извлечение и сборка клавиатуры из JSON-строки
-                    buttons_json = p_dict.get('buttons', '[]')
-                    public_markup = build_public_kb(buttons_json)
+                    # Передаем поле кнопок напрямую в нашу обновленную всеядную функцию
+                    public_markup = build_public_kb(p_dict.get('buttons'))
                     
                     logging.info(f" Наступило время публикации поста #{p_dict.get('id')}")
+
                     
                     # Фиксируем попытку отправки в базу данных
                     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
