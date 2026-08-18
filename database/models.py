@@ -83,9 +83,10 @@ def add_post(media_type, media_id, text, buttons, interval=None, publish_at=None
         target_channels = []
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
+        # ИСПРАВЛЕНО: Сохраняем buttons напрямую, так как add_post получает уже готовую строку или список
         cursor.execute(
             "INSERT INTO posts (media_type, media_id, text, buttons, interval_min, publish_at, is_delayed, target_channels) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (media_type, media_id, text, json.dumps(buttons), interval, publish_at, is_delayed, json.dumps(target_channels))
+            (media_type, media_id, text, json.dumps(buttons) if isinstance(buttons, (list, dict)) else buttons, interval, publish_at, is_delayed, json.dumps(target_channels))
         )
         conn.commit()
 
