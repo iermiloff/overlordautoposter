@@ -273,41 +273,56 @@ async def edit_btns_start(callback: CallbackQuery, state: FSMContext):
     else:
         await callback.message.edit_text(text, reply_markup=control_kb, parse_mode="Markdown")
 
-@router.callback_query(EditPostFullState.menu, F.data == "ed_clear_all_btns")
-@router.callback_query(EditPostFullState.waiting_btn_name, F.data == "ed_clear_all_btns")
+@router.callback_query(F.data == "ed_clear_all_btns")
 async def edit_btns_clear(callback: CallbackQuery, state: FSMContext):
-    """Этот хэндлер теперь сработает всегда, гасит часики и очищает базу"""
-    await callback.answer() # Сразу гасим часики в Telegram, чтобы не зависали
+    """
+    Полностью независимый хэндлер очистки кнопок.
+    Работает в любом состоянии FSM и гарантированно снимает 'часики'.
+    """
+    # 1. Сразу гасим анимацию загрузки в Telegram
+    await callback.answer()
     
     data = await state.get_data()
     post_id = data.get("ed_post_id")
     page = data.get("ed_page", 0)
     
+    # 2. Если стейт пустой (например, после рестарта бота), вытаскиваем ID поста из текста/подписи
     if not post_id:
-        # Если админ долго спал и стейт стерся, вытаскиваем ID прямо из текста сообщения
         try:
-            # Текст: "⚙️ Редактирование поста #123" -> забираем 123
-            post_id = int(callback.message.text.split("#")[1].split("\n")[0].strip())
-        except:
-            try:
-                post_id = int(callback.message.caption.split("#")[1].split("\n")[0].strip())
-            except:
-                await callback.answer("❌ Сессия устарела. Вернитесь в список постов.", show_alert=True)
-                return
+            msg_text = callback.message.text or callback.message.caption or ""
+            # Ищем подстроку "поста #123"
+            if "поста #" in msg_text:
+                post_id = int(msg_text.split("поста #")[1].split()[0].strip())
+        except Exception as e:
+            logging.error(f"Не удалось извлечь post_id из текста сообщения: {e}")
+            
+    # 3. Если ID всё же не найден, выдаем красивое предупреждение
+    if not post_id:
+        await callback.answer("❌ Сессия редактирования устарела. Откройте пост заново из списка.", show_alert=True)
+        return
 
-    # Чистим базу данных строго в валидный пустой JSON-массив
+    # 4. Очищаем поле кнопок в базе данных, записывая валидный пустой JSON-массив
     update_post_field(post_id, "buttons", "[]")
-    await callback.answer("🗑 Все инлайн-кнопки успешно удалены!", show_alert=True)
+    await callback.answer("🗑 Все инлайн-кнопки успешно удалены из этого поста!", show_alert=True)
     
+    # 5. Принудительно восстанавливаем стейт меню, чтобы админ мог продолжить работу
     await state.set_state(EditPostFullState.menu)
     await state.update_data(ed_post_id=post_id, ed_page=page)
     
+    # 6. Перерисовываем меню редактирования
     text = f"⚙️ **Редактирование поста #{post_id}**\n\nВыберите параметр для настройки:"
     if callback.message.photo or callback.message.video or callback.message.animation:
-        await callback.message.edit_caption(caption=text, reply_markup=get_edit_menu_kb(post_id, page), parse_mode="Markdown")
+        await callback.message.edit_caption(
+            caption=text, 
+            reply_markup=get_edit_menu_kb(post_id, page), 
+            parse_mode="Markdown"
+        )
     else:
-        await callback.message.edit_text(text, reply_markup=get_edit_menu_kb(post_id, page), parse_mode="Markdown")
-
+        await callback.message.edit_text(
+            text, 
+            reply_markup=get_edit_menu_kb(post_id, page), 
+            parse_mode="Markdown"
+        )
 
 @router.message(EditPostFullState.waiting_btn_name, F.text)
 async def edit_btns_name_get(message: Message, state: FSMContext):
