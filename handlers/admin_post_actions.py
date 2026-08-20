@@ -148,3 +148,236 @@ async def execute_delete_post(callback: CallbackQuery):
         await callback.message.answer("Список постов пуст.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Главное меню", callback_data="to_main_menu")]]))
     else:
         await callback.message.answer(f"📋 **Список постов (Страница {page + 1}):**", reply_markup=get_posts_list_kb(page))
+
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+import json
+from database.models import update_post_field, update_post_media, get_post_by_id
+from handlers.admin_posts_list import render_post_card
+
+class EditPostFullState(StatesGroup):
+    menu = State()
+    waiting_text = State()
+    waiting_media = State()
+    waiting_btn_name = State()
+    waiting_btn_url = State()
+    waiting_interval = State()
+    waiting_time = State()
+
+def get_edit_menu_kb(post_id: int, page: int) -> InlineKeyboardMarkup:
+    """Генерация клавиатуры выбора параметра для изменения"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📝 Изменить текст", callback_data=f"ed_field_text_{post_id}_{page}"),
+            InlineKeyboardButton(text="🖼 Изменить медиа", callback_data=f"ed_field_media_{post_id}_{page}")
+        ],
+        [
+            InlineKeyboardButton(text="🔗 Сбросить кнопки", callback_data=f"ed_field_btns_{post_id}_{page}"),
+            InlineKeyboardButton(text="⏱ Настройка времени", callback_data=f"ed_field_time_{post_id}_{page}")
+        ],
+        [
+            InlineKeyboardButton(text="« В карточку поста", callback_data=f"view_post_{post_id}_{page}")
+        ]
+    ])
+
+@router.callback_query(F.data.startswith("edit_post_"))
+async def open_edit_main_menu(callback: CallbackQuery, state: FSMContext):
+    """Входная точка: открывает главное меню редактирования"""
+    await state.clear()
+    parts = callback.data.split("_")
+    post_id, page = int(parts[2]), int(parts[3])
+    
+    await state.update_data(ed_post_id=post_id, ed_page=page)
+    await state.set_state(EditPostFullState.menu)
+    
+    text = f"⚙️ **Редактирование поста #{post_id}**\n\nВыберите параметр:"
+    await callback.message.edit_text(text, reply_markup=get_edit_menu_kb(post_id, page))
+
+# --- 1. РЕДАКТИРОВАНИЕ ТЕКСТА ---
+@router.callback_query(EditPostFullState.menu, F.data.startswith("ed_field_text_"))
+async def edit_text_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(EditPostFullState.waiting_text)
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="ed_back_to_menu")]])
+    await callback.message.edit_text("📝 **Изменение текста**\n\nОтправьте в чат новый текст:", reply_markup=cancel_kb)
+
+@router.message(EditPostFullState.waiting_text, F.text)
+async def edit_text_save(message: Message, state: FSMContext):
+    data = await state.get_data()
+    update_post_field(data["ed_post_id"], "text", message.text)
+    try: await message.delete()
+    except: pass
+    await message.answer("✅ Текст успешно изменен!")
+    await return_to_edit_menu(message, state)
+
+# --- 2. РЕДАКТИРОВАНИЕ МЕДИА ---
+@router.callback_query(EditPostFullState.menu, F.data.startswith("ed_field_media_"))
+async def edit_media_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(EditPostFullState.waiting_media)
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="ed_back_to_menu")]])
+    await callback.message.edit_text(
+        "🖼 **Изменение медиа**\n\nОтправьте новое фото/видео/GIF или знак `-` для удаления медиа:",
+        reply_markup=cancel_kb
+    )
+
+@router.message(EditPostFullState.waiting_media)
+async def edit_media_save(message: Message, state: FSMContext):
+    data = await state.get_data()
+    post_id = data["ed_post_id"]
+    
+    if message.text and message.text.strip() in ["-", "минус"]:
+        update_post_media(post_id, "text", None)
+        await message.answer("✅ Медиа удалено. Пост стал текстовым.")
+    elif message.photo:
+        update_post_media(post_id, "photo", message.photo[-1].file_id)
+        await message.answer("✅ Фото успешно обновлено!")
+    elif message.video:
+        update_post_media(post_id, "video", message.video.file_id)
+        await message.answer("✅ Видео успешно обновлено!")
+    elif message.animation:
+        update_post_media(post_id, "animation", message.animation.file_id)
+        await message.answer("✅ GIF успешно обновлена!")
+    else:
+        await message.answer("❌ Формат не поддерживается. Отправьте медиа или `-`:")
+        return
+
+    try: await message.delete()
+    except: pass
+    await return_to_edit_menu(message, state)
+
+# --- 3. НАСТРОЙКА КНОПОК ---
+@router.callback_query(EditPostFullState.menu, F.data.startswith("ed_field_btns_"))
+async def edit_btns_start(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(temp_buttons=[])
+    await state.set_state(EditPostFullState.waiting_btn_name)
+    control_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Удалить все кнопки", callback_data="ed_clear_all_btns")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="ed_back_to_menu")]
+    ])
+    await callback.message.edit_text("🔗 **Настройка кнопок**\n\nВведите текст для первой кнопки:", reply_markup=control_kb)
+
+@router.callback_query(EditPostFullState.waiting_btn_name, F.data == "ed_clear_all_btns")
+async def edit_btns_clear(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    update_post_field(data["ed_post_id"], "buttons", "[]")
+    await callback.answer("✅ Все кнопки удалены")
+    await state.set_state(EditPostFullState.menu)
+    await callback.message.edit_text(f"⚙️ **Редактирование поста #{data['ed_post_id']}**", reply_markup=get_edit_menu_kb(data["ed_post_id"], data["ed_page"]))
+
+@router.message(EditPostFullState.waiting_btn_name, F.text)
+async def edit_btns_name_get(message: Message, state: FSMContext):
+    await state.update_data(current_btn_name=message.text)
+    await state.set_state(EditPostFullState.waiting_btn_url)
+    try: await message.delete()
+    except: pass
+    await message.answer(f"Отправьте URL-ссылку для кнопки «{message.text}»:")
+
+@router.message(EditPostFullState.waiting_btn_url, F.text)
+async def edit_btns_url_get(message: Message, state: FSMContext):
+    url = message.text.strip()
+    if not (url.startswith("http://") or url.startswith("https://") or url.startswith("tg://")):
+        await message.answer("❌ Ссылка должна начинаться с http://, https:// или tg://:")
+        return
+        
+    data = await state.get_data()
+    btns = data.get("temp_buttons", [])
+    btns.append({"text": data["current_btn_name"], "url": url})
+    await state.update_data(temp_buttons=btns, current_btn_name=None)
+    try: await message.delete()
+    except: pass
+    
+    control_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Добавить еще кнопку", callback_data="ed_add_more_btn_action")],
+        [InlineKeyboardButton(text="💾 Сохранить эти кнопки", callback_data="ed_save_btns_action")]
+    ])
+    await message.answer(f"✅ Кнопка добавлена! Всего кнопок в очереди: {len(btns)} шт.", reply_markup=control_kb)
+
+@router.callback_query(F.data == "ed_add_more_btn_action")
+async def edit_btns_more_loop(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(EditPostFullState.waiting_btn_name)
+    await callback.message.edit_text("Введите название для следующей кнопки:")
+
+@router.callback_query(F.data == "ed_save_btns_action")
+async def edit_btns_finalize_save(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    update_post_field(data["ed_post_id"], "buttons", json.dumps(data["temp_buttons"]))
+    await callback.answer("✅ Список кнопок обновлен!")
+    await state.set_state(EditPostFullState.menu)
+    await callback.message.edit_text(f"⚙️ **Редактирование поста #{data['ed_post_id']}**", reply_markup=get_edit_menu_kb(data["ed_post_id"], data["ed_page"]))
+
+# --- 4. НАСТРОЙКА ТАЙМИНГОВ ---
+@router.callback_query(EditPostFullState.menu, F.data.startswith("ed_field_time_"))
+async def edit_time_type_start(callback: CallbackQuery, state: FSMContext):
+    type_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Сделать Циклическим", callback_data="ed_choose_cyclic")],
+        [InlineKeyboardButton(text="📌 Сделать Отложенным", callback_data="ed_choose_delayed")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="ed_back_to_menu")]
+    ])
+    await callback.message.edit_text("⏱ **Настройка расписания**\n\nВыберите тип публикации:", reply_markup=type_kb)
+
+@router.callback_query(F.data == "ed_choose_cyclic")
+async def edit_time_cyclic_input(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(EditPostFullState.waiting_interval)
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="ed_back_to_menu")]])
+    await callback.message.edit_text("Введите интервал повторения (в минутах):", reply_markup=cancel_kb)
+
+@router.message(EditPostFullState.waiting_interval, F.text)
+async def edit_time_cyclic_save(message: Message, state: FSMContext):
+    if not message.text.isdigit() or int(message.text) <= 0:
+        await message.answer("❌ Введите положительное целое число минут:")
+        return
+    data = await state.get_data()
+    post_id = data["ed_post_id"]
+    
+    update_post_field(post_id, "interval_min", int(message.text))
+    update_post_field(post_id, "publish_at", None)
+    update_post_field(post_id, "is_delayed", 0)
+    try: await message.delete()
+    except: pass
+    await message.answer("✅ Пост переведен в циклический режим!")
+    await return_to_edit_menu(message, state)
+
+@router.callback_query(F.data == "ed_choose_delayed")
+async def edit_time_delayed_input(callback: CallbackQuery, state: FSMContext):
+    from database.models import get_timezone
+    await state.set_state(EditPostFullState.waiting_time)
+    current_tz = get_timezone()
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="ed_back_to_menu")]])
+    await callback.message.edit_text(
+        f"**Ввод времени публикации**\n\nПояс: `{current_tz}`\n"
+        f"Шаблон: `ДД.ММ.ГГГГ ЧЧ:ММ` (Пример: `25.12.2026 14:00`):",
+        reply_markup=cancel_kb, parse_mode="Markdown"
+    )
+
+@router.message(EditPostFullState.waiting_time, F.text)
+async def edit_time_delayed_save(message: Message, state: FSMContext):
+    from datetime import datetime
+    time_str = message.text.strip()
+    try:
+        datetime.strptime(time_str, "%d.%m.%Y %H:%M")
+    except ValueError:
+        await message.answer("❌ Неверный формат. Используйте шаблон `ДД.ММ.ГГГГ ЧЧ:ММ`:")
+        return
+        
+    data = await state.get_data()
+    post_id = data["ed_post_id"]
+    
+    update_post_field(post_id, "interval_min", None)
+    update_post_field(post_id, "publish_at", time_str)
+    update_post_field(post_id, "is_delayed", 1)
+    try: await message.delete()
+    except: pass
+    await message.answer(f"✅ Переведено в отложенный режим! Время: {time_str}")
+    await return_to_edit_menu(message, state)
+
+# --- НАВИГАЦИЯ ---
+@router.callback_query(F.data == "ed_back_to_menu")
+async def edit_cancel_to_menu_callback(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    await state.set_state(EditPostFullState.menu)
+    await callback.message.edit_text(f"⚙️ **Редактирование поста #{data['ed_post_id']}**", reply_markup=get_edit_menu_kb(data["ed_post_id"], data["ed_page"]))
+
+async def return_to_edit_menu(message: Message, state: FSMContext):
+    data = await state.get_data()
+    await state.set_state(EditPostFullState.menu)
+    await message.answer(f"⚙️ **Редактирование поста #{data['ed_post_id']}**", reply_markup=get_edit_menu_kb(data["ed_post_id"], data["ed_page"]))
