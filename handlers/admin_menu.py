@@ -110,26 +110,33 @@ async def back_to_main_menu(callback: CallbackQuery):
         await callback.message.answer(text, reply_markup=kb)
 
 def build_public_kb(buttons_data) -> InlineKeyboardMarkup:
-    """Создает клавиатуру для подписчиков из сохраненного в БД JSON или списка"""
+    """Полностью безопасное создание инлайн-кнопок для подписчиков"""
     if not buttons_data:
         return None
-
-    # Цикл распаковки на случай многократной сериализации в строку
+        
+    # Если это пустая строка, JSON-массив из пробелов или "null"
+    if isinstance(buttons_data, str):
+        cleaned = buttons_data.strip()
+        if not cleaned or cleaned in ["[]", "null", "", "{}"]:
+            return None
+            
+    # Циклическая распаковка строк на случай двойного json.dumps()
     while isinstance(buttons_data, str):
         try:
             buttons_data = json.loads(buttons_data)
         except Exception:
+            # Если в базе лежит битый текст, который не распарсить
             return None
 
     if not isinstance(buttons_data, list) or not buttons_data:
         return None
 
-    # Формируем инлайн-кнопки по одной на строку
     keyboard = []
     for btn in buttons_data:
         if isinstance(btn, dict) and 'text' in btn and 'url' in btn:
             keyboard.append([InlineKeyboardButton(text=btn['text'], url=btn['url'])])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
+
 
 
