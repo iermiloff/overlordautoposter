@@ -276,15 +276,34 @@ async def edit_btns_start(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(EditPostFullState.waiting_btn_name, F.data == "ed_clear_all_btns")
 async def edit_btns_clear(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    update_post_field(data["ed_post_id"], "buttons", "[]")
-    await callback.answer("✅ Все кнопки удалены")
+    post_id = data.get("ed_post_id")
+    page = data.get("ed_page", 0)
+    
+    # 1. Записываем пустой JSON в базу данных
+    update_post_field(post_id, "buttons", "[]")
+    
+    # 2. Обязательно гасим часики анимации в Telegram!
+    await callback.answer("✅ Все кнопки удалены", show_alert=True)
+    
+    # 3. Переводим состояние обратно в меню
     await state.set_state(EditPostFullState.menu)
     
-    text = f"⚙️ **Редактирование поста #{data['ed_post_id']}**"
+    # 4. Безопасно обновляем интерфейс в зависимости от типа сообщения
+    text = f"⚙️ **Редактирование поста #{post_id}**\n\nВыберите параметр для настройки:"
+    
     if callback.message.photo or callback.message.video or callback.message.animation:
-        await callback.message.edit_caption(caption=text, reply_markup=get_edit_menu_kb(data["ed_post_id"], data["ed_page"]))
+        await callback.message.edit_caption(
+            caption=text, 
+            reply_markup=get_edit_menu_kb(post_id, page), 
+            parse_mode="Markdown"
+        )
     else:
-        await callback.message.edit_text(text, reply_markup=get_edit_menu_kb(data["ed_post_id"], data["ed_page"]))
+        await callback.message.edit_text(
+            text, 
+            reply_markup=get_edit_menu_kb(post_id, page), 
+            parse_mode="Markdown"
+        )
+
 
 @router.message(EditPostFullState.waiting_btn_name, F.text)
 async def edit_btns_name_get(message: Message, state: FSMContext):
