@@ -183,7 +183,7 @@ def get_edit_menu_kb(post_id: int, page: int) -> InlineKeyboardMarkup:
 
 @router.callback_query(F.data.startswith("edit_post_"))
 async def open_edit_main_menu(callback: CallbackQuery, state: FSMContext):
-    """Входная точка: открывает главное меню редактирования"""
+    """Входная точка: открывает главное меню редактирования (с поддержкой медиа-сообщений)"""
     await state.clear()
     parts = callback.data.split("_")
     post_id, page = int(parts[2]), int(parts[3])
@@ -191,15 +191,25 @@ async def open_edit_main_menu(callback: CallbackQuery, state: FSMContext):
     await state.update_data(ed_post_id=post_id, ed_page=page)
     await state.set_state(EditPostFullState.menu)
     
-    text = f"⚙️ **Редактирование поста #{post_id}**\n\nВыберите параметр:"
-    await callback.message.edit_text(text, reply_markup=get_edit_menu_kb(post_id, page))
+    text = f"⚙️ **Редактирование поста #{post_id}**\n\nВыберите параметр для настройки:"
+    
+    # Исправление бага: проверяем, содержит ли сообщение медиаданные
+    if callback.message.photo or callback.message.video or callback.message.animation:
+        await callback.message.edit_caption(caption=text, reply_markup=get_edit_menu_kb(post_id, page), parse_mode="Markdown")
+    else:
+        await callback.message.edit_text(text, reply_markup=get_edit_menu_kb(post_id, page), parse_mode="Markdown")
 
 # --- 1. РЕДАКТИРОВАНИЕ ТЕКСТА ---
 @router.callback_query(EditPostFullState.menu, F.data.startswith("ed_field_text_"))
 async def edit_text_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(EditPostFullState.waiting_text)
     cancel_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="ed_back_to_menu")]])
-    await callback.message.edit_text("📝 **Изменение текста**\n\nОтправьте в чат новый текст:", reply_markup=cancel_kb)
+    text = "📝 **Изменение текста**\n\nОтправьте в чат новый текст для публикации:"
+    
+    if callback.message.photo or callback.message.video or callback.message.animation:
+        await callback.message.edit_caption(caption=text, reply_markup=cancel_kb, parse_mode="Markdown")
+    else:
+        await callback.message.edit_text(text, reply_markup=cancel_kb, parse_mode="Markdown")
 
 @router.message(EditPostFullState.waiting_text, F.text)
 async def edit_text_save(message: Message, state: FSMContext):
@@ -215,10 +225,12 @@ async def edit_text_save(message: Message, state: FSMContext):
 async def edit_media_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(EditPostFullState.waiting_media)
     cancel_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="ed_back_to_menu")]])
-    await callback.message.edit_text(
-        "🖼 **Изменение медиа**\n\nОтправьте новое фото/видео/GIF или знак `-` для удаления медиа:",
-        reply_markup=cancel_kb
-    )
+    text = "🖼 **Изменение медиа**\n\nОтправьте новое фото/видео/GIF или знак `-` для удаления медиафайла:"
+    
+    if callback.message.photo or callback.message.video or callback.message.animation:
+        await callback.message.edit_caption(caption=text, reply_markup=cancel_kb, parse_mode="Markdown")
+    else:
+        await callback.message.edit_text(text, reply_markup=cancel_kb, parse_mode="Markdown")
 
 @router.message(EditPostFullState.waiting_media)
 async def edit_media_save(message: Message, state: FSMContext):
@@ -227,7 +239,7 @@ async def edit_media_save(message: Message, state: FSMContext):
     
     if message.text and message.text.strip() in ["-", "минус"]:
         update_post_media(post_id, "text", None)
-        await message.answer("✅ Медиа удалено. Пост стал текстовым.")
+        await message.answer("✅ Медиа удалено. Пост переведен в текстовый режим.")
     elif message.photo:
         update_post_media(post_id, "photo", message.photo[-1].file_id)
         await message.answer("✅ Фото успешно обновлено!")
@@ -370,12 +382,16 @@ async def edit_time_delayed_save(message: Message, state: FSMContext):
     await message.answer(f"✅ Переведено в отложенный режим! Время: {time_str}")
     await return_to_edit_menu(message, state)
 
-# --- НАВИГАЦИЯ ---
 @router.callback_query(F.data == "ed_back_to_menu")
 async def edit_cancel_to_menu_callback(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     await state.set_state(EditPostFullState.menu)
-    await callback.message.edit_text(f"⚙️ **Редактирование поста #{data['ed_post_id']}**", reply_markup=get_edit_menu_kb(data["ed_post_id"], data["ed_page"]))
+    text = f"⚙️ **Редактирование поста #{data['ed_post_id']}**"
+    
+    if callback.message.photo or callback.message.video or callback.message.animation:
+        await callback.message.edit_caption(caption=text, reply_markup=get_edit_menu_kb(data["ed_post_id"], data["ed_page"]))
+    else:
+        await callback.message.edit_text(text, reply_markup=get_edit_menu_kb(data["ed_post_id"], data["ed_page"]))
 
 async def return_to_edit_menu(message: Message, state: FSMContext):
     data = await state.get_data()
