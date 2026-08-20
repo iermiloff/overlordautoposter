@@ -73,56 +73,72 @@ def get_post_manage_kb(post_id: int, is_active: int, page: int) -> InlineKeyboar
         [InlineKeyboardButton(text="🗑 Удалить пост", callback_data=f"confirm_del_{post_id}_{page}")],
         [InlineKeyboardButton(text="« Назад к списку", callback_data=f"posts_page_{page}")]
     ])
-
 async def render_post_card(event, post_id: int, page: int):
     if isinstance(event, CallbackQuery): target_message = event.message
     else: target_message = event
     
     post = get_post_by_id(post_id)
     if not post:
-        if isinstance(event, CallbackQuery): await event.answer("❌ Пост не найден.", show_alert=True)
+        if isinstance(event, CallbackQuery): await event.answer("❌Пост не найден.", show_alert=True)
         return
-        
+    
     p_dict = dict(post)
     status_str = "Активен" if p_dict.get('is_active', 1) == 1 else "На паузе"
     last_p = p_dict.get('last_posted') if p_dict.get('last_posted') else "Ни разу"
     
     if p_dict.get('is_delayed', 0) == 1:
-        type_str = f"⏰ Отложенный (План: `{p_dict.get('publish_at', '')}`)"
+        type_str = f" Отложенный (План: `{p_dict.get('publish_at', '')}`)"
     else:
-        type_str = f"🔄 Циклический (Каждые {p_dict.get('interval_min', 0)} мин.)"
-        
-    try: btn_count = len(json.loads(p_dict.get('buttons', '[]')))
-    except: btn_count = 0
+        type_str = f" Циклический (Каждые {p_dict.get('interval_min', 0)} мин.)"
     
+    # Безопасный подсчет кнопок для карточки администратора
+    btn_count = 0
+    raw_btns = p_dict.get('buttons')
+    if raw_btns:
+        if isinstance(raw_btns, str):
+            try:
+                parsed_btns = json.loads(raw_btns)
+                if isinstance(parsed_btns, list): btn_count = len(parsed_btns)
+            except: pass
+        elif isinstance(raw_btns, list):
+            btn_count = len(raw_btns)
+            
     caption = (
-        f"📄 **Карточка поста #{p_dict.get('id')}**\n\n"
-        f"🔹 **Статус:** {status_str}\n"
-        f"🔹 **Тип:** {type_str}\n"
-        f"🔹 **Кнопок:** {btn_count} шт.\n"
-        f"🔹 **Последняя отправка:** {last_p}\n\n"
-        f"📝 **Текст поста:**\n---\n{p_dict.get('text', '')}\n---"
+        f" **Карточка поста #{p_dict.get('id')}**\n\n"
+        f" **Статус:** {status_str}\n"
+        f" **Тип:** {type_str}\n"
+        f" **Кнопок:** {btn_count} шт.\n"
+        f" **Последняя отправка:** {last_p}\n\n"
+        f" **Текст поста:**\n---\n{p_dict.get('text', '')}\n---"
     )
-    markup = get_post_manage_kb(post_id, p_dict.get('is_active', 1), page)
     
+    markup = get_post_manage_kb(post_id, p_dict.get('is_active', 1), page)
     m_type = p_dict.get('media_type')
     m_id = p_dict.get('media_id')
     
-    if m_type in [None, "text"]:
-        if isinstance(event, CallbackQuery): await target_message.edit_text(caption, reply_markup=markup, parse_mode="Markdown")
+    # Отправка/редактирование с обработкой исключений, чтобы интерфейс админа не «умирал»
+    try:
+        if m_type in [None, "text"]:
+            if isinstance(event, CallbackQuery): 
+                await target_message.edit_text(caption, reply_markup=markup, parse_mode="Markdown")
+            else:
+                try: await target_message.delete()
+                except: pass
+                await target_message.answer(caption, reply_markup=markup, parse_mode="Markdown")
         else:
             try: await target_message.delete()
             except: pass
-            await target_message.answer(caption, reply_markup=markup, parse_mode="Markdown")
-    else:
-        try: await target_message.delete()
-        except: pass
-        if m_type == "photo":
-            await target_message.answer_photo(photo=m_id, caption=caption, reply_markup=markup, parse_mode="Markdown")
-        elif m_type == "video":
-            await target_message.answer_video(video=m_id, caption=caption, reply_markup=markup, parse_mode="Markdown")
-        elif m_type == "animation":
-            await target_message.answer_animation(animation=m_id, caption=caption, reply_markup=markup, parse_mode="Markdown")
+            if m_type == "photo":
+                await target_message.answer_photo(photo=m_id, caption=caption, reply_markup=markup, parse_mode="Markdown")
+            elif m_type == "video":
+                await target_message.answer_video(video=m_id, caption=caption, reply_markup=markup, parse_mode="Markdown")
+            elif m_type == "animation":
+                await target_message.answer_animation(animation=m_id, caption=caption, reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Ошибка рендеринга карточки поста #{post_id}: {e}")
+        # Фолбэк-вариант: если разметка Markdown или медиафайл сломались, отправляем чистым текстом
+        await target_message.answer(f"⚠️ Ошибка отображения медиа. ID поста: {post_id}\n{caption[:100]}", reply_markup=markup)
+
             
 @router.callback_query(F.data.startswith("view_post_"))
 async def view_single_post(callback: CallbackQuery):
