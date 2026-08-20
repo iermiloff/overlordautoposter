@@ -96,13 +96,14 @@ async def process_fsm_toggle_channel(callback: CallbackQuery, state: FSMContext)
 async def process_fsm_channels_done(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     if not data.get("selected_channels"):
-        await callback.answer("⚠️ Выберите хотя бы один канал!", show_alert=True)
+        await callback.answer(" Выберите хотя бы один канал!", show_alert=True)
         return
-    await state.set_state(AddPostState.button_name)
-    await callback.message.edit_text("🔘 **Шаг 4 из 5: Настройка кнопок**", reply_markup=get_buttons_control_kb())
+    await state.set_state(AddPostState.buttons_menu) # <-- Переводим в меню
+    await callback.message.edit_text(" **Шаг 4 из 5: Настройка кнопок**", reply_markup=get_buttons_control_kb())
 
-@router.callback_query(AddPostState.button_name, F.data == "add_one_more_btn")
-async def ask_button_name(callback: CallbackQuery):
+@router.callback_query(AddPostState.buttons_menu, F.data == "add_one_more_btn")
+async def ask_button_name(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AddPostState.button_name) # <-- Только теперь ждем имя кнопки
     await callback.message.edit_text("Введите название кнопки:", reply_markup=get_cancel_kb())
 
 @router.message(AddPostState.button_name, F.text)
