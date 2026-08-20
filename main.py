@@ -83,37 +83,61 @@ async def autoposting_scheduler(bot: Bot):
                             should_publish = True
                 
                 # --- ВЫПОЛНЕНИЕ ПУБЛИКАЦИИ ---
-                if should_publish:
-                    # Передаем поле кнопок напрямую в нашу обновленную всеядную функцию
-                    public_markup = build_public_kb(p_dict.get('buttons'))
-                    
-                    logging.info(f" Наступило время публикации поста #{p_dict.get('id')}")
+ # --- ВЫПОЛНЕНИЕ ПУБЛИКАЦИИ ---
+ if should_publish:
+     # Передаем поле кнопок напрямую в нашу обновленную всеядную функцию
+     public_markup = build_public_kb(p_dict.get('buttons'))
+     
+     # ОТЛАДОЧНЫЙ ЛОГ: Посмотрим, создалась ли разметка кнопок
+     if public_markup:
+         logging.info(f" Сгенерирована клавиатура для поста #{p_dict.get('id')}: {public_markup.inline_keyboard}")
+     else:
+         logging.warning(f" Клавиатура для поста #{p_dict.get('id')} НЕ создана (build_public_kb вернула None). В базе данных лежит: {p_dict.get('buttons')}")
+ 
+     logging.info(f" Наступило время публикации поста #{p_dict.get('id')}")
+     
+     # Фиксируем попытку отправки в базу данных
+     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+     update_last_posted(p_dict.get('id'), now_str)
+     
+     # Перебираем каналы
+     for channel_id in channels:
+         try:
+             m_type = p_dict.get('media_type')
+             m_id = p_dict.get('media_id')
+             text_content = p_dict.get('text', '')
+             
+             # Безопасный parse_mode: если Markdown ломает отправку, бот отправит как чистый текст
+             try:
+                 if m_type in [None, "text"]:
+                     await bot.send_message(chat_id=channel_id, text=text_content, 
+                                            reply_markup=public_markup, parse_mode="Markdown")
+                 elif m_type == "photo":
+                     await bot.send_photo(chat_id=channel_id, photo=m_id, caption=text_content, 
+                                          reply_markup=public_markup, parse_mode="Markdown")
+                 elif m_type == "video":
+                     await bot.send_video(chat_id=channel_id, video=m_id, caption=text_content, 
+                                          reply_markup=public_markup, parse_mode="Markdown")
+                 elif m_type == "animation":
+                     await bot.send_animation(chat_id=channel_id, animation=m_id, 
+                                              caption=text_content, reply_markup=public_markup, parse_mode="Markdown")
+             except Exception as telegram_err:
+                 logging.error(f"❌ Ошибка Telegram (возможно битый Markdown). Пробуем отправить БЕЗ parse_mode: {telegram_err}")
+                 # Резервный запуск без parse_mode, чтобы пост и кнопки точно ушли
+                 if m_type in [None, "text"]:
+                     await bot.send_message(chat_id=channel_id, text=text_content, reply_markup=public_markup)
+                 elif m_type == "photo":
+                     await bot.send_photo(chat_id=channel_id, photo=m_id, caption=text_content, reply_markup=public_markup)
+                 elif m_type == "video":
+                     await bot.send_video(chat_id=channel_id, video=m_id, caption=text_content, reply_markup=public_markup)
+                 elif m_type == "animation":
+                     await bot.send_animation(chat_id=channel_id, animation=m_id, caption=text_content, reply_markup=public_markup)
+             
+             logging.info(f"✅ Пост #{p_dict.get('id')} успешно отправлен в канал {channel_id}")
+             
+         except Exception as e:
+             logging.error(f"❌ Критическая ошибка отправки поста #{p_dict.get('id')} в канал {channel_id}: {e}")
 
-                    
-                    # Фиксируем попытку отправки в базу данных
-                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    update_last_posted(p_dict.get('id'), now_str)
-                    
-                    # Перебираем каналы
-                    for channel_id in channels:
-                        try:
-                            m_type = p_dict.get('media_type')
-                            m_id = p_dict.get('media_id')
-                            text_content = p_dict.get('text', '')
-                            
-                            if m_type in [None, "text"]:
-                                await bot.send_message(chat_id=channel_id, text=text_content, reply_markup=public_markup, parse_mode="Markdown")
-                            elif m_type == "photo":
-                                await bot.send_photo(chat_id=channel_id, photo=m_id, caption=text_content, reply_markup=public_markup, parse_mode="Markdown")
-                            elif m_type == "video":
-                                await bot.send_video(chat_id=channel_id, video=m_id, caption=text_content, reply_markup=public_markup, parse_mode="Markdown")
-                            elif m_type == "animation":
-                                await bot.send_animation(chat_id=channel_id, animation=m_id, caption=text_content, reply_markup=public_markup, parse_mode="Markdown")
-                            
-                            logging.info(f"✅ Пост #{p_dict.get('id')} успешно отправлен в канал {channel_id}")
-                            
-                        except Exception as e:
-                            logging.error(f"❌ Ошибка отправки поста #{p_dict.get('id')} в канал {channel_id}: {e}")
                     
                     # Если пост был отложенным (одноразовым) — удаляем его после успешной публикации
                     if p_dict.get('is_delayed', 0) == 1:
