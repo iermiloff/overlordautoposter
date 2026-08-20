@@ -273,36 +273,40 @@ async def edit_btns_start(callback: CallbackQuery, state: FSMContext):
     else:
         await callback.message.edit_text(text, reply_markup=control_kb, parse_mode="Markdown")
 
+@router.callback_query(EditPostFullState.menu, F.data == "ed_clear_all_btns")
 @router.callback_query(EditPostFullState.waiting_btn_name, F.data == "ed_clear_all_btns")
 async def edit_btns_clear(callback: CallbackQuery, state: FSMContext):
+    """Этот хэндлер теперь сработает всегда, гасит часики и очищает базу"""
+    await callback.answer() # Сразу гасим часики в Telegram, чтобы не зависали
+    
     data = await state.get_data()
     post_id = data.get("ed_post_id")
     page = data.get("ed_page", 0)
     
-    # 1. Записываем пустой JSON в базу данных
+    if not post_id:
+        # Если админ долго спал и стейт стерся, вытаскиваем ID прямо из текста сообщения
+        try:
+            # Текст: "⚙️ Редактирование поста #123" -> забираем 123
+            post_id = int(callback.message.text.split("#")[1].split("\n")[0].strip())
+        except:
+            try:
+                post_id = int(callback.message.caption.split("#")[1].split("\n")[0].strip())
+            except:
+                await callback.answer("❌ Сессия устарела. Вернитесь в список постов.", show_alert=True)
+                return
+
+    # Чистим базу данных строго в валидный пустой JSON-массив
     update_post_field(post_id, "buttons", "[]")
+    await callback.answer("🗑 Все инлайн-кнопки успешно удалены!", show_alert=True)
     
-    # 2. Обязательно гасим часики анимации в Telegram!
-    await callback.answer("✅ Все кнопки удалены", show_alert=True)
-    
-    # 3. Переводим состояние обратно в меню
     await state.set_state(EditPostFullState.menu)
+    await state.update_data(ed_post_id=post_id, ed_page=page)
     
-    # 4. Безопасно обновляем интерфейс в зависимости от типа сообщения
     text = f"⚙️ **Редактирование поста #{post_id}**\n\nВыберите параметр для настройки:"
-    
     if callback.message.photo or callback.message.video or callback.message.animation:
-        await callback.message.edit_caption(
-            caption=text, 
-            reply_markup=get_edit_menu_kb(post_id, page), 
-            parse_mode="Markdown"
-        )
+        await callback.message.edit_caption(caption=text, reply_markup=get_edit_menu_kb(post_id, page), parse_mode="Markdown")
     else:
-        await callback.message.edit_text(
-            text, 
-            reply_markup=get_edit_menu_kb(post_id, page), 
-            parse_mode="Markdown"
-        )
+        await callback.message.edit_text(text, reply_markup=get_edit_menu_kb(post_id, page), parse_mode="Markdown")
 
 
 @router.message(EditPostFullState.waiting_btn_name, F.text)
