@@ -109,29 +109,41 @@ async def back_to_main_menu(callback: CallbackQuery):
         except: pass
         await callback.message.answer(text, reply_markup=kb)
 
+import json
+import logging
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
 def build_public_kb(buttons_data) -> InlineKeyboardMarkup:
-    """Создает клавиатуру для подписчиков из сохраненного в БД JSON-текста"""
+    """Создает клавиатуру для подписчиков из сохраненного в БД JSON или списка"""
     if not buttons_data:
         return None
-        
-    # Если пришла строка из БД, превращаем её в Python-список
+ 
+    # Если пришла строка (из БД), пытаемся её распарсить
     if isinstance(buttons_data, str):
         try:
-            buttons_data = json.loads(buttons_data)
-        except Exception:
+            cleaned = buttons_data.strip()
+            if cleaned in ["[]", "null", "", "{}"]:
+                return None
+            parsed = json.loads(cleaned)
+            # Защита от двойной сериализации
+            if isinstance(parsed, str):
+                parsed = json.loads(parsed)
+            buttons_data = parsed
+        except Exception as e:
+            logging.error(f"Ошибка парсинга кнопок в build_public_kb: {e}")
             return None
-
-    # Если после парсинга это не список или он пустой — кнопок нет
+ 
     if not isinstance(buttons_data, list) or not buttons_data:
         return None
-        
+ 
+    # Формируем инлайн-кнопки по одной на строку
     keyboard = []
     for btn in buttons_data:
         if isinstance(btn, dict) and 'text' in btn and 'url' in btn:
-            keyboard.append([InlineKeyboardButton(text=btn['text'], url=btn['url'])])
-            
-    return InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
-
-
-
-
+            # Важно: используем строго типы aiogram 3.x
+            keyboard.append([InlineKeyboardButton(text=str(btn['text']), url=str(btn['url']))])
+ 
+    if not keyboard:
+        return None
+        
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
