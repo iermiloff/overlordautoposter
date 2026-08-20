@@ -16,6 +16,7 @@ class AddPostState(StatesGroup):
     media = State()
     channels = State()
     button_name = State()
+    buttons_menu = State()
     button_url = State()
     post_type = State()       # Стейт выбора типа публикации
     interval = State()        # Стейт ввода интервала
