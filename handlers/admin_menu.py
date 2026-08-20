@@ -113,26 +113,23 @@ def build_public_kb(buttons_data) -> InlineKeyboardMarkup:
     """Создает клавиатуру для подписчиков из сохраненного в БД JSON или списка"""
     if not buttons_data:
         return None
-        
-    # Если пришла строка (из БД), пытаемся её распарсить
-    if isinstance(buttons_data, str):
+
+    # Цикл распаковки на случай многократной сериализации в строку
+    while isinstance(buttons_data, str):
         try:
-            parsed = json.loads(buttons_data)
-            # Защита от двойной сериализации (если строка парсится снова в строку)
-            if isinstance(parsed, str):
-                parsed = json.loads(parsed)
-            buttons_data = parsed
+            buttons_data = json.loads(buttons_data)
         except Exception:
             return None
-            
+
     if not isinstance(buttons_data, list) or not buttons_data:
         return None
-        
+
     # Формируем инлайн-кнопки по одной на строку
     keyboard = []
     for btn in buttons_data:
         if isinstance(btn, dict) and 'text' in btn and 'url' in btn:
             keyboard.append([InlineKeyboardButton(text=btn['text'], url=btn['url'])])
-            
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
+
 
